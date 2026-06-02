@@ -1,4 +1,8 @@
-
+---
+name: "Issue template"
+about: "use this for future issues"   <-- This is the description in the menu
+title: "-"             <-- This pre-fills the issue title
+---
 ## Objective
 <!-- Short summary of what is being designed and why. -->
 
