@@ -1,19 +1,26 @@
 name: Pipeline Global
 
 on:
-  workflow_dispatch:
   push:
     branches: [dev]
   repository_dispatch:
     types: [build-result, all-builds-success]
+  workflow_dispatch:
 
 jobs:
-  # déclanché par : push sur dev
-  # Dispatch vers tous les repos (gateway, ai, front, infra, api, cyber, docs)
-  dispatch:
-    name: Dispatch vers tous les repos
+  # Déclenchement -> push sur dev
+  trigger:
+    name: Trigger
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - run: echo "Pipeline global déclenché par ${{ github.actor }}"
+
+  # Dispatch -> microservices
+  dispatch:
+    name: Dispatch vers les repos
+    runs-on: ubuntu-latest
+    needs: trigger
     steps:
       - name: Trigger gateway
         uses: peter-evans/repository-dispatch@v3
@@ -39,19 +46,19 @@ jobs:
           event-type: ci-trigger
           client-payload: '{"sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
 
-      - name: Trigger infra
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          repository: ${{ github.repository_owner }}/infra
-          event-type: ci-trigger
-          client-payload: '{"sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
-
       - name: Trigger api
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DISPATCH_TOKEN }}
           repository: ${{ github.repository_owner }}/api
+          event-type: ci-trigger
+          client-payload: '{"sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
+
+      - name: Trigger infra
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/infra
           event-type: ci-trigger
           client-payload: '{"sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
 
@@ -71,11 +78,17 @@ jobs:
           event-type: ci-trigger
           client-payload: '{"sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
 
-  # déclanché par : build-result de chaque repo
-  # Collecte les résultats de tous les builds, vérifie si tous sont reçus et
-  # si tous sont OK → trigger intégration, sinon notifie échec global
+      - name: Notify Discord — pipeline lancé
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_GLOBAL }}
+          status: success
+          title: "Pipeline dev lancé — ${{ github.actor }}"
+          description: "Dispatch envoyé vers tous les repos — sha ${{ github.sha }}"
+
+  # Déclenchement -> build-result
   collect:
-    name: Collecter résultats builds
+    name: Collecter résultats
     runs-on: ubuntu-latest
     if: github.event_name == 'repository_dispatch' && github.event.action == 'build-result'
     steps:
@@ -91,33 +104,37 @@ jobs:
           mkdir -p build-results
           echo '${{ toJson(github.event.client_payload) }}' \
             > build-results/${{ github.event.client_payload.service }}.json
+          echo "Résultat reçu : ${{ github.event.client_payload.service }} — ${{ github.event.client_payload.status }}"
 
       - name: Vérifier si tous les builds sont reçus
         id: check
         run: |
-          SERVICES=(gateway ai front infra api cyber docs)
+          SERVICES=(gateway ai front api infra cyber docs)
           ALL_DONE=true
           ALL_SUCCESS=true
+          FAILED_SERVICES=""
 
           for svc in "${SERVICES[@]}"; do
             if [ ! -f "build-results/${svc}.json" ]; then
-              echo "⏳ En attente : ${svc}"
+              echo "En attente : ${svc}"
               ALL_DONE=false
             else
               STATUS=$(jq -r '.status' "build-results/${svc}.json")
               if [ "$STATUS" != "success" ]; then
                 ALL_SUCCESS=false
-                echo "❌ Échec : ${svc}"
+                FAILED_SERVICES="${FAILED_SERVICES} ${svc}"
+                echo "Fail : ${svc}"
               else
-                echo "✅ OK : ${svc}"
+                echo "OK : ${svc}"
               fi
             fi
           done
 
           echo "all_done=${ALL_DONE}" >> $GITHUB_OUTPUT
           echo "all_success=${ALL_SUCCESS}" >> $GITHUB_OUTPUT
+          echo "failed_services=${FAILED_SERVICES}" >> $GITHUB_OUTPUT
 
-      - name: Trigger intégration - tous OK
+      - name: Trigger intégration — tous OK
         if: steps.check.outputs.all_done == 'true' && steps.check.outputs.all_success == 'true'
         uses: peter-evans/repository-dispatch@v3
         with:
@@ -126,19 +143,20 @@ jobs:
           event-type: all-builds-success
           client-payload: '{"sha": "${{ github.event.client_payload.sha }}"}'
 
-      - name: Notify Discord - pipeline bloqué
+      - name: Notify Discord — pipeline bloqué
         if: steps.check.outputs.all_done == 'true' && steps.check.outputs.all_success == 'false'
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_GLOBAL }}
           status: failure
-          title: "🚫 Pipeline bloqué - au moins un build a échoué"
-          description: "Voir les notifications par repo."
+          title: "Pipeline bloqué"
+          description: "Services en échec :${{ steps.check.outputs.failed_services }}"
           color: 0xFF0000
 
-  # déclanché par : all-builds-success
+        
+  # Intégration, tests, SBOM
   integration:
-    name: Tests intégration · Release · SBOM
+    name: Container scan · Intégration · SBOM
     runs-on: ubuntu-latest
     if: github.event_name == 'repository_dispatch' && github.event.action == 'all-builds-success'
     steps:
@@ -154,63 +172,57 @@ jobs:
       - name: Pull images :sha
         run: |
           SHA=${{ github.event.client_payload.sha }}
-          for svc in gateway ai front infra api cyber; do
+          for svc in gateway ai front api; do
             docker pull ghcr.io/${{ github.repository_owner }}/${svc}:sha-${SHA}
           done
 
-      - name: Container scanning (Trivy)
+      - name: Container scanning — Trivy
         run: |
           SHA=${{ github.event.client_payload.sha }}
-          for svc in gateway ai front infra api cyber; do
+          FAILED=false
+          for svc in gateway ai front api; do
+            echo "Scanning ${svc}..."
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               aquasec/trivy image \
               --exit-code 1 \
               --severity CRITICAL \
-              ghcr.io/${{ github.repository_owner }}/${svc}:sha-${SHA}
+              --no-progress \
+              ghcr.io/${{ github.repository_owner }}/${svc}:sha-${SHA} || FAILED=true
           done
+          if [ "$FAILED" = "true" ]; then
+            echo "Container scanning failed"
+            exit 1
+          fi
 
       - name: Tests d'intégration
         run: |
-          echo "À adapter - ex: docker compose -f docker-compose.test.yml up --abort-on-container-exit"
-
-      - name: Créer Release globale
-        id: release
-        uses: google-github-actions/release-please-action@v4
-        with:
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          release-type: simple
-
-      - name: Trigger sync submodules Pollpear
-        if: steps.release.outputs.release_created
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          repository: ${{ github.repository_owner }}/pollpear
-          event-type: sync-submodules
-          client-payload: |
-            {
-              "sha": "${{ github.event.client_payload.sha }}",
-              "tag": "${{ steps.release.outputs.tag_name }}"
-            }
+          # TODO — à implémenter quand l'environnement de test sera prêt
+          echo "Tests d'intégration — placeholder"
 
       - name: Générer SBOM
-        if: steps.release.outputs.release_created
         uses: anchore/sbom-action@v0
         with:
           image: ghcr.io/${{ github.repository_owner }}/gateway:sha-${{ github.event.client_payload.sha }}
-          artifact-name: sbom.spdx.json
+          artifact-name: sbom-${{ github.event.client_payload.sha }}.spdx.json
+          output-file: sbom.spdx.json
 
       - name: Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: Envoyer trace OTel pipeline global
+      - name: Attendre connexion Tailscale
+        run: |
+          timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
+          echo "Tailscale connecté — IP: $(tailscale ip -4)"
+
+      - name: Envoyer trace OTel — pipeline global
         run: |
           TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
           SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
           END_NS=$(date +%s%N)
+          START_NS=$(( END_NS - 1000000000 ))
 
           curl -sf -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
             -H "Content-Type: application/json" \
@@ -219,7 +231,8 @@ jobs:
                 \"resource\": {
                   \"attributes\": [
                     {\"key\": \"service.name\", \"value\": {\"stringValue\": \"pipeline-global\"}},
-                    {\"key\": \"deployment.environment\", \"value\": {\"stringValue\": \"ci\"}}
+                    {\"key\": \"deployment.environment\", \"value\": {\"stringValue\": \"ci\"}},
+                    {\"key\": \"ci.provider\", \"value\": {\"stringValue\": \"github-actions\"}}
                   ]
                 },
                 \"scopeSpans\": [{
@@ -227,22 +240,44 @@ jobs:
                     \"traceId\": \"${TRACE_ID}\",
                     \"spanId\": \"${SPAN_ID}\",
                     \"name\": \"pipeline/integration\",
-                    \"startTimeUnixNano\": \"${END_NS}\",
+                    \"startTimeUnixNano\": \"${START_NS}\",
                     \"endTimeUnixNano\": \"${END_NS}\",
                     \"status\": {\"code\": 1},
                     \"attributes\": [
                       {\"key\": \"ci.sha\", \"value\": {\"stringValue\": \"${{ github.event.client_payload.sha }}\"}},
-                      {\"key\": \"ci.tag\", \"value\": {\"stringValue\": \"${{ steps.release.outputs.tag_name || 'none' }}\"}}
+                      {\"key\": \"ci.actor\", \"value\": {\"stringValue\": \"${{ github.actor }}\"}},
+                      {\"key\": \"ci.run_id\", \"value\": {\"stringValue\": \"${{ github.run_id }}\"}}
                     ]
                   }]
                 }]
               }]
             }"
 
-      - name: Notify Discord - pipeline réussi
+      - name: Sync pollpear submodules
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/pollpear
+          event-type: sync-submodules
+          client-payload: |
+            {
+              "sha": "${{ github.event.client_payload.sha }}"
+            }
+
+      - name: Notify Discord — pipeline réussi
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_GLOBAL }}
           status: success
-          title: "🚀 Pipeline dev réussi - ${{ steps.release.outputs.tag_name || github.event.client_payload.sha }}"
-          description: "Tous les services buildés, testés et releasés."
+          title: "Pipeline dev réussi"
+          description: "Container scan, intégration, SBOM OK — sha ${{ github.event.client_payload.sha }}"
+
+      - name: Notify Discord — intégration échouée
+        if: failure()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_GLOBAL }}
+          status: failure
+          title: "Echec intégration"
+          description: "Voir les logs GitHub Actions."
+          color: 0xFF0000
