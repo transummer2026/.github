@@ -1,4 +1,4 @@
-name: CI Docs (Réutilisable)
+name: CI Docs (Réutilisables)
 
 on:
   workflow_dispatch:
@@ -128,6 +128,10 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Attendre connexion Tailscale
+        run: |
+          timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
+          echo "Tailscale connecté — IP: $(tailscale ip -4)"
 
       - name: Déterminer statut
         id: status
@@ -148,7 +152,8 @@ jobs:
           DURATION_MS=${{ needs.docs.outputs.duration_ms || '0' }}
           START_NS=$(( END_NS - DURATION_MS * 1000000 ))
 
-          curl -sf -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
+          curl -
+            f -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
             -H "Content-Type: application/json" \
             -d "{
               \"resourceSpans\": [{
