@@ -152,8 +152,7 @@ jobs:
           DURATION_MS=${{ needs.docs.outputs.duration_ms || '0' }}
           START_NS=$(( END_NS - DURATION_MS * 1000000 ))
 
-          curl -
-            f -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
+          curl -f -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
             -H "Content-Type: application/json" \
             -d "{
               \"resourceSpans\": [{
