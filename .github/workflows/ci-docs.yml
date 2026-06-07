@@ -128,10 +128,13 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-      - name: Attendre connexion Tailscale
+      - name: Attendre connexion Tailscale et ping
         run: |
           timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
           echo "Tailscale connecté — IP: $(tailscale ip -4)"
+          echo "Ping VPS..."
+          ping -c 3 100.65.25.93 || echo "Ping échoué"
+
 
       - name: Déterminer statut
         id: status
