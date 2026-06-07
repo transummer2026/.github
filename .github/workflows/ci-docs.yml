@@ -43,8 +43,6 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@v16
         with:
           globs: "**/*.md"
-          config: ".markdownlint.json"
-          ignore-path: ".markdownlintignore"
 
       - name: Vérifier nommage dossiers (Pascal_snake_case)
         run: |
