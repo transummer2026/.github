@@ -1,6 +1,7 @@
 name: Pipeline Global
 
 on:
+  workflow_dispatch:
   push:
     branches: [dev]
   repository_dispatch:

@@ -1,6 +1,7 @@
 name: CI Service (Réutilisable)
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       service_name:

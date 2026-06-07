@@ -1,6 +1,7 @@
 name: CI Docs (Réutilisable)
 
 on:
+  workflow_dispatch:
   workflow_call:
     secrets:
       OTEL_ENDPOINT:
