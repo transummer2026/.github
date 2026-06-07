@@ -42,7 +42,14 @@ jobs:
       - name: Markdown lint
         uses: DavidAnson/markdownlint-cli2-action@v16
         with:
-          globs: "**/*.md"
+          globs: |
+            **/*.md
+            !Archives/**
+            !.github/**
+            !Pv/**
+            !Todo/**
+            !Template/**
+            !Diagrams_uml/**
 
       - name: Vérifier nommage dossiers (Pascal_snake_case)
         run: |
