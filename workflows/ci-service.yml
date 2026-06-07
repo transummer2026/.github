@@ -1,0 +1,323 @@
+name: CI Service (Réutilisable)
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Nom du service (ex: gateway, api, front)"
+        required: true
+        type: string
+      lint_cmd:
+        description: "Commande de lint"
+        required: true
+        type: string
+      test_cmd:
+        description: "Commande de test"
+        required: true
+        type: string
+      build_cmd:
+        description: "Commande de build"
+        required: true
+        type: string
+      coverage_threshold:
+        description: "Seuil de couverture minimal (%)"
+        required: false
+        type: number
+        default: 80
+      audit_cmd:
+        description: "Commande dependency audit"
+        required: false
+        type: string
+        default: ""
+      coverage_cmd:
+        description: "Commande qui génère le coverage"
+        required: false
+        type: string
+        default: ""
+      coverage_format:
+        description: "Format du coverage : cobertura | lcov | tarpaulin"
+        required: false
+        type: string
+        default: "lcov"
+    secrets:
+      OTEL_ENDPOINT:
+        required: true
+      TAILSCALE_AUTHKEY:
+        required: true
+      DISCORD_WEBHOOK_REPO:
+        required: true
+      GHCR_TOKEN:
+        required: true
+      DISPATCH_TOKEN:
+        required: true
+
+jobs:
+  # job 1 - CHECKS
+  checks:
+    name: Commit lint · Secret scan · Audit
+    runs-on: ubuntu-latest
+    outputs:
+      audit_severity: ${{ steps.audit.outputs.severity }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Commit lint
+        uses: wagoid/commitlint-github-action@v6
+
+      - name: Secret scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
+          extra_args: --only-verified
+
+      - name: Dependency audit
+        id: audit
+        run: |
+          SEVERITY="none"
+          if [ -n "${{ inputs.audit_cmd }}" ]; then
+            set +e
+            OUTPUT=$(${{ inputs.audit_cmd }} 2>&1)
+            EXIT=$?
+            set -e
+            echo "$OUTPUT"
+            if echo "$OUTPUT" | grep -qiE "critical|high"; then
+              SEVERITY="critical"
+            elif echo "$OUTPUT" | grep -qiE "medium|low"; then
+              SEVERITY="low"
+            fi
+          fi
+          echo "severity=${SEVERITY}" >> $GITHUB_OUTPUT
+
+      - name: Notify Discord - CVE critique
+        if: steps.audit.outputs.severity == 'critical'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: failure
+          title: "CVE critique - ${{ inputs.service_name }}"
+          description: "@${{ github.actor }} doit corriger avant merge."
+          color: 0xFF0000
+
+      - name: Bloquer si CVE critique
+        if: steps.audit.outputs.severity == 'critical'
+        run: exit 1
+
+      - name: Notify Discord - CVE mineure
+        if: steps.audit.outputs.severity == 'low'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: warning
+          title: "CVE mineure - ${{ inputs.service_name }}"
+          description: "CVE medium/low détectée (info). Aucun blocage."
+          color: 0xFFA500
+
+  # job 2 - QUALITY
+  quality:
+    name: Lint · SAST · Tests · Coverage
+    runs-on: ubuntu-latest
+    needs: checks
+    outputs:
+      test_count: ${{ steps.tests.outputs.test_count }}
+      coverage: ${{ steps.tests.outputs.coverage }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        id: timer_start
+        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
+
+      - name: Lint
+        run: ${{ inputs.lint_cmd }}
+
+      - name: SAST - Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: auto
+
+      - name: Tests unitaires
+        id: tests
+        run: |
+          ${{ inputs.test_cmd }}
+
+      - name: Coverage
+        id: coverage
+        if: inputs.coverage_cmd != ''
+        run: |
+          ${{ inputs.coverage_cmd }}
+
+          # Extraire le % de coverage selon le format
+          COVERAGE=0
+          if [ "${{ inputs.coverage_format }}" = "cobertura" ]; then
+            # Pour cargo tarpaulin --out Xml et pytest --cov-report=xml
+            COVERAGE=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1 | awk '{printf "%d", $1 * 100}')
+          elif [ "${{ inputs.coverage_format }}" = "lcov" ]; then
+            # Pour jest --coverage (lcov.info)
+            TOTAL=$(grep -E "^LF:" coverage/lcov.info | awk -F: '{sum+=$2} END{print sum}')
+            HIT=$(grep -E "^LH:" coverage/lcov.info | awk -F: '{sum+=$2} END{print sum}')
+            if [ "$TOTAL" -gt 0 ]; then
+              COVERAGE=$(awk "BEGIN {printf \"%d\", ($HIT/$TOTAL)*100}")
+            fi
+          fi
+
+          echo "coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+
+      - name: Coverage threshold
+        if: inputs.coverage_cmd != ''
+        run: |
+          COVERAGE=${{ steps.coverage.outputs.coverage }}
+          THRESHOLD=${{ inputs.coverage_threshold }}
+          if [ "${COVERAGE}" -lt "${THRESHOLD}" ]; then
+            echo "❌ Coverage ${COVERAGE}% < seuil ${THRESHOLD}%"
+            exit 1
+          fi
+          echo "✅ Coverage ${COVERAGE}% >= seuil ${THRESHOLD}%"
+
+  # job 3 - BUILD
+  build:
+    name: Build · Push GHCR
+    runs-on: ubuntu-latest
+    needs: quality
+    outputs:
+      duration_ms: ${{ steps.timer.outputs.ms }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        id: timer_start
+        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ inputs.service_name }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+
+      - name: Build & Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Compute duration
+        id: timer
+        if: always()
+        run: |
+          END=$(date +%s%3N)
+          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
+
+  # job 4 - OBSERVE
+  observe:
+    name: OTel · Discord · Dispatch
+    runs-on: ubuntu-latest
+    needs: [checks, quality, build]
+    if: always()
+    steps:
+      - name: Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Déterminer statut global
+        id: status
+        run: |
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            echo "result=success" >> $GITHUB_OUTPUT
+            echo "status_code=1" >> $GITHUB_OUTPUT
+          else
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "status_code=2" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Envoyer trace OTel
+        run: |
+          TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
+          SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
+          END_NS=$(date +%s%N)
+          DURATION_MS=${{ needs.build.outputs.duration_ms || '0' }}
+          START_NS=$(( END_NS - DURATION_MS * 1000000 ))
+
+          curl -sf -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"resourceSpans\": [{
+                \"resource\": {
+                  \"attributes\": [
+                    {\"key\": \"service.name\", \"value\": {\"stringValue\": \"${{ inputs.service_name }}\"}},
+                    {\"key\": \"deployment.environment\", \"value\": {\"stringValue\": \"ci\"}},
+                    {\"key\": \"ci.provider\", \"value\": {\"stringValue\": \"github-actions\"}},
+                    {\"key\": \"ci.repo\", \"value\": {\"stringValue\": \"${{ github.repository }}\"}},
+                    {\"key\": \"ci.branch\", \"value\": {\"stringValue\": \"${{ github.ref_name }}\"}}
+                  ]
+                },
+                \"scopeSpans\": [{
+                  \"spans\": [{
+                    \"traceId\": \"${TRACE_ID}\",
+                    \"spanId\": \"${SPAN_ID}\",
+                    \"name\": \"ci/${{ inputs.service_name }}\",
+                    \"startTimeUnixNano\": \"${START_NS}\",
+                    \"endTimeUnixNano\": \"${END_NS}\",
+                    \"status\": {\"code\": ${{ steps.status.outputs.status_code }}},
+                    \"attributes\": [
+                      {\"key\": \"ci.run_id\", \"value\": {\"stringValue\": \"${{ github.run_id }}\"}},
+                      {\"key\": \"ci.run_number\", \"value\": {\"stringValue\": \"${{ github.run_number }}\"}},
+                      {\"key\": \"ci.actor\", \"value\": {\"stringValue\": \"${{ github.actor }}\"}},
+                      {\"key\": \"ci.status\", \"value\": {\"stringValue\": \"${{ steps.status.outputs.result }}\"}},
+                      {\"key\": \"ci.duration_ms\", \"value\": {\"intValue\": ${DURATION_MS}}},
+                      {\"key\": \"ci.test_count\", \"value\": {\"intValue\": ${{ needs.quality.outputs.test_count || '0' }}}},
+                      {\"key\": \"ci.coverage\", \"value\": {\"intValue\": ${{ steps.coverage.outputs.coverage || '0' }}}}
+                    ]
+                  }]
+                }]
+              }]
+            }"
+
+      - name: Notify Discord - succès
+        if: steps.status.outputs.result == 'success'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: success
+          title: "✅ Build réussi - ${{ inputs.service_name }}"
+          description: "Image poussée - sha-${{ github.sha }}"
+
+      - name: Notify Discord - échec
+        if: steps.status.outputs.result == 'failure'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: failure
+          title: "❌ Build échoué - ${{ inputs.service_name }}"
+          description: "@${{ github.actor }} - voir les logs"
+          color: 0xFF0000
+
+      - name: Dispatch retour vers pipeline global
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/.github
+          event-type: build-result
+          client-payload: |
+            {
+              "service": "${{ inputs.service_name }}",
+              "status": "${{ steps.status.outputs.result }}",
+              "sha": "${{ github.sha }}",
+              "run_id": "${{ github.run_id }}",
+              "image": "ghcr.io/${{ github.repository_owner }}/${{ inputs.service_name }}:sha-${{ github.sha }}"
+            }
