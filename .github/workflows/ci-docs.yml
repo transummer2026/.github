@@ -37,7 +37,7 @@ jobs:
         uses: wagoid/commitlint-github-action@v6
 
       - name: Secret scanning
-        uses: trufflesecurity/trufflehog@v3
+        uses: trufflesecurity/trufflehog@v3.95.5
         with:
           path: ./
           base: ${{ github.event.before }}
