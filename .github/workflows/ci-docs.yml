@@ -56,14 +56,14 @@ jobs:
             !Template/**
             !Diagrams_uml/**
 
-      - name: Vérifier nommage dossiers (Pascal_snake_case)
+      - name: Vérifier nommage dossiers (snake_case)
         run: |
           find . -mindepth 1 -maxdepth 3 -type d \
             ! -path './.git*' \
             ! -path './node_modules*' | while read dir; do
             name=$(basename "$dir")
-            if ! echo "$name" | grep -qE '^[A-Z][a-zA-Z0-9]*(_[A-Z][a-zA-Z0-9]*)*$'; then
-              echo "❌ Dossier mal nommé : $dir (attendu Pascal_snake_case)"
+            if ! echo "$name" | grep -qE '^[A-Z][a-z0-9]*(_[a-z0-9]+)*$'; then
+              echo "❌ Dossier mal nommé : $dir (attendu Snake_case avec 1ere lettre majuscule)"
               exit 1
             fi
           done
