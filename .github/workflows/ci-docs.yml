@@ -58,32 +58,66 @@ jobs:
 
       - name: Vérifier nommage dossiers (snake_case)
         run: |
-          find . -mindepth 1 -maxdepth 3 -type d \
-            ! -path './.git*' \
-            ! -path './node_modules*' | while read dir; do
+          IGNORED=$(jq -r '.ignored_folders[]' .ci_config.json 2>/dev/null)
+
+          find . -mindepth 1 -maxdepth 3 -type d | while read dir; do
             name=$(basename "$dir")
+
+            ignored=false
+            for pattern in $IGNORED; do
+              if echo "$dir" | grep -q "/$pattern"; then
+                ignored=true
+                break
+              fi
+            done
+            [ "$ignored" = true ] && continue
+
             if ! echo "$name" | grep -qE '^[A-Z][a-z0-9]*(_[a-z0-9]+)*$'; then
-              echo "❌ Dossier mal nommé : $dir (attendu Snake_case avec 1ere lettre majuscule)"
+              echo "❌ Dossier mal nommé : $dir (attendu Snake_case)"
               exit 1
             fi
           done
 
       - name: Vérifier nommage fichiers Markdown (Train-Case)
         run: |
+          IGNORED=$(jq -r '.ignored_files[]' .ci_config.json 2>/dev/null)
+
           find . -name "*.md" ! -path './.git*' | while read file; do
             name=$(basename "$file" .md)
-            if ! echo "$name" | grep -qE '^[A-Z][a-zA-Z0-9]*(-[A-Z][a-zA-Z0-9]*)*$'; then
-              echo "❌ Fichier Markdown mal nommé : $file (attendu Train-Case)"
+
+            ignored=false
+            for pattern in $IGNORED; do
+              if [ "$name" = "$pattern" ]; then
+                ignored=true
+                break
+              fi
+            done
+            [ "$ignored" = true ] && continue
+
+            if ! echo "$name" | grep -qE '^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$'; then
+              echo "❌ Fichier Markdown mal nommé : $file (attendu Train-Case ou Start-Case)"
               exit 1
             fi
           done
 
       - name: Vérifier nommage fichiers PlantUML (Pascal_snake_case)
         run: |
-          find . -name "*.puml" ! -path './.git*' | while read file; do
+          IGNORED=$(jq -r '.ignored_files[]' .ci_config.json 2>/dev/null)
+
+          find . -path '*/Diagrams_uml/*.puml' ! -path './.git*' | while read file; do
             name=$(basename "$file" .puml)
-            if ! echo "$name" | grep -qE '^[A-Z][a-zA-Z0-9]*(_[A-Z][a-zA-Z0-9]*)*$'; then
-              echo "❌ Fichier PUML mal nommé : $file (attendu Pascal_snake_case)"
+
+            ignored=false
+            for pattern in $IGNORED; do
+              if [ "$name" = "$pattern" ]; then
+                ignored=true
+                break
+              fi
+            done
+            [ "$ignored" = true ] && continue
+
+            if ! echo "$name" | grep -qE '^[A-Z][a-z0-9]*(_[A-Z][a-z0-9]*)*$'; then
+              echo "❌ Fichier PUML mal nommé : $file (attendu Pascal_Snake_case)"
               exit 1
             fi
           done
@@ -91,8 +125,21 @@ jobs:
       - name: Vérifier préfixes dans dossier Template
         run: |
           if [ -d "./Template" ]; then
+            IGNORED=$(jq -r '.ignored_files[]' .ci_config.json 2>/dev/null)
+
             find ./Template -type f | while read file; do
               name=$(basename "$file")
+
+              # Vérifier si le fichier est ignoré
+              ignored=false
+              for pattern in $IGNORED; do
+                if [ "$name" = "$pattern" ]; then
+                  ignored=true
+                  break
+                fi
+              done
+              [ "$ignored" = true ] && continue
+
               if ! echo "$name" | grep -qE '^TPL[-_]'; then
                 echo "❌ Fichier sans préfixe TPL dans Template : $file"
                 exit 1
@@ -106,15 +153,18 @@ jobs:
           args: --verbose --no-progress './**/*.md'
           fail: true
 
-      - name: Génération auto PV et TODO
-        run: |
-          echo "# PV Auto-généré - $(date +%Y-%m-%d)" > _PV.md
-          find . -name "PV-*.md" ! -path './.git*' | sort >> _PV.md || true
-          echo "# TODO Auto-généré - $(date +%Y-%m-%d)" > _TODO.md
-          grep -rn "TODO" --include="*.md" . ! -path './.git*' >> _TODO.md || true
+      # - name: Génération auto PV et TODO
+      #   run: |
+      #     echo "# PV Auto-généré - $(date +%Y-%m-%d)" > _PV.md
+      #     find . -name "PV-*.md" ! -path './.git*' | sort >> _PV.md || true
+      #     echo "# TODO Auto-généré - $(date +%Y-%m-%d)" > _TODO.md
+      #     grep -rn "TODO" --include="*.md" . ! -path './.git*' >> _TODO.md || true
 
       - name: Versioning & publication
-        run: echo "À adapter selon ton outil (MkDocs, Docusaurus...)"
+        uses: google-github-actions/release-please-action@v4
+        with:
+          release-type: simple
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute duration
         id: timer
