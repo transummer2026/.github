@@ -1,17 +1,24 @@
 name: Pipeline Global
 
 on:
+  pull_request:
+    branches: [dev, main, staging]
   push:
     branches: [dev]
   repository_dispatch:
     types: [build-result, all-builds-success]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   # Déclenchement -> push sur dev
   trigger:
     name: Trigger
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - run: echo "Pipeline global déclenché par ${{ github.actor }}"
@@ -20,6 +27,7 @@ jobs:
   dispatch:
     name: Dispatch vers les repos
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: trigger
     steps:
       - name: Trigger gateway
@@ -90,6 +98,7 @@ jobs:
   collect:
     name: Collecter résultats
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event_name == 'repository_dispatch' && github.event.action == 'build-result'
     steps:
       - name: Restaurer cache résultats
@@ -158,6 +167,7 @@ jobs:
   integration:
     name: Container scan · Intégration · SBOM
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     if: github.event_name == 'repository_dispatch' && github.event.action == 'all-builds-success'
     steps:
       - uses: actions/checkout@v4
@@ -200,12 +210,33 @@ jobs:
           # TODO — à implémenter quand l'environnement de test sera prêt
           echo "Tests d'intégration — placeholder"
 
-      - name: Générer SBOM
+      - name: Générer SBOM — gateway
         uses: anchore/sbom-action@v0
         with:
           image: ghcr.io/${{ github.repository_owner }}/gateway:sha-${{ github.event.client_payload.sha }}
-          artifact-name: sbom-${{ github.event.client_payload.sha }}.spdx.json
-          output-file: sbom.spdx.json
+          artifact-name: sbom-gateway-${{ github.event.client_payload.sha }}.spdx.json
+          output-file: sbom-gateway.spdx.json
+
+      - name: Générer SBOM — ai
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/ai:sha-${{ github.event.client_payload.sha }}
+          artifact-name: sbom-ai-${{ github.event.client_payload.sha }}.spdx.json
+          output-file: sbom-ai.spdx.json
+
+      - name: Générer SBOM — front
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/front:sha-${{ github.event.client_payload.sha }}
+          artifact-name: sbom-front-${{ github.event.client_payload.sha }}.spdx.json
+          output-file: sbom-front.spdx.json
+
+      - name: Générer SBOM — api
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/api:sha-${{ github.event.client_payload.sha }}
+          artifact-name: sbom-api-${{ github.event.client_payload.sha }}.spdx.json
+          output-file: sbom-api.spdx.json
 
       - name: Tailscale
         uses: tailscale/github-action@v2
