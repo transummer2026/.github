@@ -137,7 +137,7 @@ jobs:
               # Fichiers Template : check préfixe TPL
               if [[ "$entry" == ./Template/* ]]; then
                 is_ignored_base "$base" "${IGNORED_TEMPLATES[@]}" && continue
-                if ! [[ "$base" =~ ^TPL[-_] ]]; then
+                if ! [[ "$base" =~ ^Template[-_] ]]; then
                   template_errors+=("  $entry")
                 fi
                 continue
@@ -177,7 +177,7 @@ jobs:
 
           if [ "$total" -gt 0 ]; then
             echo "Total : $total erreur(s)"
-            exit 1
+            exit s
           else
             echo "✅ Tous les nommages sont corrects"
           fi
