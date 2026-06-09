@@ -56,82 +56,6 @@ jobs:
             !Template/**
             !Diagrams_uml/**
 
-      - name: Vérifier nommage dossiers (snake_case)
-        run: |
-          IGNORED=$(jq -r '.ignored_folders[]' .ci_config.json 2>/dev/null)
-          error=false
-
-          while read dir; do
-            name=$(basename "$dir")
-            ignored=false
-            for pattern in $IGNORED; do
-              if echo "$dir" | grep -q "/$pattern"; then
-                ignored=true
-                break
-              fi
-            done
-            [ "$ignored" = true ] && continue
-
-            if ! echo "$name" | grep -qE '^[A-Z][a-z0-9]*(_[a-z0-9]+)*$'; then
-              echo "❌ Dossier mal nommé : $dir (attendu Snake_case)"
-              error=true
-            fi
-          done < <(find . -mindepth 1 -maxdepth 3 -type d)
-
-          [ "$error" = true ] && exit 1
-
-      - name: Vérifier nommage fichiers Markdown (Train-Case)
-        run: |
-          IGNORED=$(jq -r '.ignored_files[]' .ci_config.json 2>/dev/null)
-          error=false
-                  
-          while read file; do
-            name=$(basename "$file" .md)
-            ignored=false
-            for pattern in $IGNORED; do
-              if [ "$name" = "$pattern" ]; then
-                ignored=true
-                break
-              fi
-            done
-            [ "$ignored" = true ] && continue
-                  
-            if ! echo "$name" | grep -qE '^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$'; then
-              echo "❌ Fichier Markdown mal nommé : $file (attendu Train-Case ou Start-Case)"
-              error=true
-            fi
-          done < <(find . -name "*.md" ! -path './.git*')
-                  
-          [ "$error" = true ] && exit 1
-
-
-
-      - name: Vérifier préfixes dans dossier Template
-        run: |
-          if [ -d "./Template" ]; then
-            IGNORED=$(jq -r '.ignored_files[]' .ci_config.json 2>/dev/null)
-            error=false
-                  
-            while read file; do
-              name=$(basename "$file")
-              ignored=false
-              for pattern in $IGNORED; do
-                if [ "$name" = "$pattern" ]; then
-                  ignored=true
-                  break
-                fi
-              done
-              [ "$ignored" = true ] && continue
-                  
-              if ! echo "$name" | grep -qE '^TPL[-_]'; then
-                echo "❌ Fichier sans préfixe TPL dans Template : $file"
-                error=true
-              fi
-            done < <(find ./Template -type f)
-                  
-            [ "$error" = true ] && exit 1
-          fi
-
       - name: Vérification des liens Markdown
         uses: lycheeverse/lychee-action@v1
         with:
@@ -158,11 +82,92 @@ jobs:
           END=$(date +%s%3N)
           echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
 
+  naming:
+    name: Nommage · Dossiers · Fichiers · Templates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier tous les nommages
+        run: |
+          mapfile -t IGNORED_FOLDERS  < <(jq -r '.ignored_folders[]'       .ci_config.json 2>/dev/null)
+          mapfile -t IGNORED_FILES    < <(jq -r '.ignored_files[]'         .ci_config.json 2>/dev/null)
+          mapfile -t IGNORED_TEMPLATES< <(jq -r '.ignored_Templates_files[]' .ci_config.json 2>/dev/null)
+          errors=()
+
+          is_ignored_path() {
+            local path="$1"; shift
+            for pattern in "$@"; do
+              [[ "$path" == *"/$pattern"* || "$path" == *"/$pattern" ]] && return 0
+            done
+            return 1
+          }
+
+          is_ignored_base() {
+            local base="$1"; shift
+            for pattern in "$@"; do
+              [[ "$base" == "$pattern" ]] && return 0
+            done
+            return 1
+          }
+
+          check_train_case() {
+            local name="$1"
+            [[ "$name" =~ ^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$ ]]
+          }
+
+          # --- Passe unique sur tout l'arbre ---
+          while read -r entry; do
+            if [ -d "$entry" ]; then
+              is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
+              name=$(basename "$entry")
+              if ! [[ "$name" =~ ^[A-Z][a-z0-9]*(_[a-z0-9]+)*$ ]]; then
+                errors+=("❌ Dossier mal nommé : $entry (attendu Snake_case)")
+              fi
+
+            else
+              base=$(basename "$entry")
+
+              # Fichiers Template : check préfixe TPL
+              if [[ "$entry" == ./Template/* ]]; then
+                is_ignored_base "$base" "${IGNORED_TEMPLATES[@]}" && continue
+                if ! [[ "$base" =~ ^TPL[-_] ]]; then
+                  errors+=("❌ Fichier sans préfixe TPL dans Template : $entry")
+                fi
+                continue
+              fi
+
+              # Autres fichiers : check Train-Case
+              is_ignored_base "$base" "${IGNORED_FILES[@]}" && continue
+              if [[ "$base" == *.md ]]; then
+                name="${base#_}"; name="${name%.md}"   # _ prefix autorisé
+              else
+                name="${base%.*}"
+              fi
+              if ! check_train_case "$name"; then
+                errors+=("❌ Fichier mal nommé : $entry (attendu Train-Case)")
+              fi
+            fi
+          done < <(find . -mindepth 1 -maxdepth 3 ! -path './.git*' \( -type f -o -type d \))
+
+          # --- Rapport final ---
+          if [ ${#errors[@]} -gt 0 ]; then
+            echo ""
+            echo "=== Erreurs de nommage ==="
+            for err in "${errors[@]}"; do echo "$err"; done
+            echo ""
+            echo "Total : ${#errors[@]} erreur(s)"
+            exit 1
+          else
+            echo "✅ Tous les nommages sont corrects"
+          fi
+
   observe:
     name: OTel · Discord · Dispatch
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    needs: docs
+    needs: [docs, naming]
     if: always()
     steps:
       - name: Tailscale
@@ -180,7 +185,7 @@ jobs:
       - name: Déterminer statut
         id: status
         run: |
-          if [[ "${{ needs.docs.result }}" == "success" ]]; then
+          if [[ "${{ needs.docs.result }}" == "success" && "${{ needs.naming.result }}" == "success" ]]; then
             echo "result=success" >> $GITHUB_OUTPUT
             echo "status_code=1" >> $GITHUB_OUTPUT
           else
