@@ -107,10 +107,16 @@ jobs:
             return 1
           }
 
-          is_ignored_base() {
-            local base="$1"; shift
+          is_ignored_file() {
+            local entry="$1" base="$2"; shift 2
             for pattern in "$@"; do
-              [[ "$base" == "$pattern" ]] && return 0
+              if [[ "$pattern" == */* || "$pattern" == *\** ]]; then
+                # pattern avec chemin ou glob → match sur le chemin complet
+                [[ "$entry" == ./$pattern ]] && return 0
+              else
+                # nom simple → match sur le basename
+                [[ "$base" == "$pattern" ]] && return 0
+              fi
             done
             return 1
           }
@@ -144,7 +150,7 @@ jobs:
               fi
 
               # Autres fichiers : check Train-Case
-              is_ignored_base "$base" "${IGNORED_FILES[@]}" && continue
+              is_ignored_file "$entry" "$base" "${IGNORED_FILES[@]}" && continue
               if [[ "$base" == *.md ]]; then
                 name="${base#_}"; name="${name%.md}"
               else
@@ -177,7 +183,7 @@ jobs:
 
           if [ "$total" -gt 0 ]; then
             echo "Total : $total erreur(s)"
-            exit s
+            exit 1
           else
             echo "✅ Tous les nommages sont corrects"
           fi
