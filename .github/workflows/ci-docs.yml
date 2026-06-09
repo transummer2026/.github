@@ -12,6 +12,8 @@ on:
         required: true
       DISPATCH_TOKEN:
         required: true
+      RELEASE_PLEASE_TOKEN:
+        required: true
 
 concurrency:
   group: ${{ github.repository }}-docs-${{ github.ref }}
@@ -22,9 +24,6 @@ jobs:
     name: Lint · Checks · Publication
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
-      pull-requests: write
     outputs:
       duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
@@ -76,7 +75,7 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           release-type: simple
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - name: Compute duration
         id: timer
