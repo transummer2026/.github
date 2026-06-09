@@ -91,10 +91,13 @@ jobs:
 
       - name: Vérifier tous les nommages
         run: |
-          mapfile -t IGNORED_FOLDERS  < <(jq -r '.ignored_folders[]'       .ci_config.json 2>/dev/null)
-          mapfile -t IGNORED_FILES    < <(jq -r '.ignored_files[]'         .ci_config.json 2>/dev/null)
-          mapfile -t IGNORED_TEMPLATES< <(jq -r '.ignored_Templates_files[]' .ci_config.json 2>/dev/null)
-          errors=()
+          mapfile -t IGNORED_FOLDERS   < <(jq -r '.ignored_folders[]'        .ci_config.json 2>/dev/null)
+          mapfile -t IGNORED_FILES     < <(jq -r '.ignored_files[]'          .ci_config.json 2>/dev/null)
+          mapfile -t IGNORED_TEMPLATES < <(jq -r '.ignored_Templates_files[]' .ci_config.json 2>/dev/null)
+
+          folder_errors=()
+          file_errors=()
+          template_errors=()
 
           is_ignored_path() {
             local path="$1"; shift
@@ -113,8 +116,7 @@ jobs:
           }
 
           check_train_case() {
-            local name="$1"
-            [[ "$name" =~ ^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$ ]]
+            [[ "$1" =~ ^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$ ]]
           }
 
           # --- Passe unique sur tout l'arbre ---
@@ -123,17 +125,20 @@ jobs:
               is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
               name=$(basename "$entry")
               if ! [[ "$name" =~ ^[A-Z][a-z0-9]*(_[a-z0-9]+)*$ ]]; then
-                errors+=("❌ Dossier mal nommé : $entry (attendu Snake_case)")
+                folder_errors+=("  $entry")
               fi
 
             else
               base=$(basename "$entry")
 
+              # Fichiers dans un dossier ignoré → skip
+              is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
+
               # Fichiers Template : check préfixe TPL
               if [[ "$entry" == ./Template/* ]]; then
                 is_ignored_base "$base" "${IGNORED_TEMPLATES[@]}" && continue
                 if ! [[ "$base" =~ ^TPL[-_] ]]; then
-                  errors+=("❌ Fichier sans préfixe TPL dans Template : $entry")
+                  template_errors+=("  $entry")
                 fi
                 continue
               fi
@@ -141,23 +146,37 @@ jobs:
               # Autres fichiers : check Train-Case
               is_ignored_base "$base" "${IGNORED_FILES[@]}" && continue
               if [[ "$base" == *.md ]]; then
-                name="${base#_}"; name="${name%.md}"   # _ prefix autorisé
+                name="${base#_}"; name="${name%.md}"
               else
                 name="${base%.*}"
               fi
               if ! check_train_case "$name"; then
-                errors+=("❌ Fichier mal nommé : $entry (attendu Train-Case)")
+                file_errors+=("  $entry")
               fi
             fi
           done < <(find . -mindepth 1 -maxdepth 3 ! -path './.git*' \( -type f -o -type d \))
 
           # --- Rapport final ---
-          if [ ${#errors[@]} -gt 0 ]; then
+          total=$(( ${#folder_errors[@]} + ${#file_errors[@]} + ${#template_errors[@]} ))
+
+          if [ ${#folder_errors[@]} -gt 0 ]; then
+            echo "❌ Dossiers mal nommés (${#folder_errors[@]}) — attendu Snake_case"
+            printf '%s\n' "${folder_errors[@]}"
             echo ""
-            echo "=== Erreurs de nommage ==="
-            for err in "${errors[@]}"; do echo "$err"; done
+          fi
+          if [ ${#template_errors[@]} -gt 0 ]; then
+            echo "❌ Template sans préfixe TPL (${#template_errors[@]})"
+            printf '%s\n' "${template_errors[@]}"
             echo ""
-            echo "Total : ${#errors[@]} erreur(s)"
+          fi
+          if [ ${#file_errors[@]} -gt 0 ]; then
+            echo "❌ Fichiers mal nommés (${#file_errors[@]}) — attendu Train-Case"
+            printf '%s\n' "${file_errors[@]}"
+            echo ""
+          fi
+
+          if [ "$total" -gt 0 ]; then
+            echo "Total : $total erreur(s)"
             exit 1
           else
             echo "✅ Tous les nommages sont corrects"
