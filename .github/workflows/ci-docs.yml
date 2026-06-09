@@ -70,7 +70,7 @@ jobs:
       #     grep -rn "TODO" --include="*.md" . ! -path './.git*' >> _TODO.md || true
 
       - name: Versioning & publication
-        uses: google-github-actions/release-please-action@v4
+        uses: googleapis/release-please-action@v4
         with:
           release-type: simple
           token: ${{ secrets.GITHUB_TOKEN }}
