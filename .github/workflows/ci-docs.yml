@@ -91,6 +91,8 @@ jobs:
 
       - name: Vérifier tous les nommages
         run: |
+          export LC_ALL=en_US.UTF-8
+
           mapfile -t IGNORED_FOLDERS   < <(jq -r '.ignored_folders[]'        .ci_config.json 2>/dev/null)
           mapfile -t IGNORED_FILES     < <(jq -r '.ignored_files[]'          .ci_config.json 2>/dev/null)
           mapfile -t IGNORED_TEMPLATES < <(jq -r '.ignored_Templates_files[]' .ci_config.json 2>/dev/null)
@@ -122,7 +124,7 @@ jobs:
           }
 
           check_train_case() {
-            [[ "$1" =~ ^[A-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$ ]]
+            [[ "$1" =~ ^[[:upper:]][[:alnum:]]*([-][[:alnum:]]+)*$ ]]
           }
 
           # --- Passe unique sur tout l'arbre ---
@@ -130,7 +132,7 @@ jobs:
             if [ -d "$entry" ]; then
               is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
               name=$(basename "$entry")
-              if ! [[ "$name" =~ ^[A-Z][a-z0-9]*(_[a-z0-9]+)*$ ]]; then
+              if ! [[ "$name" =~ ^[[:upper:]][[:lower:][:digit:]]*(_[[:lower:][:digit:]]+)*$ ]]; then
                 folder_errors+=("  $entry")
               fi
 
@@ -140,10 +142,11 @@ jobs:
               # Fichiers dans un dossier ignoré → skip
               is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
 
-              # Fichiers Template : check préfixe TPL
+              # Fichiers Template : check préfixe Template[-_]
               if [[ "$entry" == ./Template/* ]]; then
-                is_ignored_base "$base" "${IGNORED_TEMPLATES[@]}" && continue
-                if ! [[ "$base" =~ ^Template[-_] ]]; then
+                is_ignored_file "$entry" "$base" "${IGNORED_TEMPLATES[@]}" && continue
+                check="${base#_}"   # strip _ prefix si présent
+                if ! [[ "$check" =~ ^Template[-_] ]]; then
                   template_errors+=("  $entry")
                 fi
                 continue
