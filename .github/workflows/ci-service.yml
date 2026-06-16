@@ -154,7 +154,7 @@ jobs:
 
       - name: Parse test count
         id: tests
-        run: bash .ci/.github/scripts/parse-test-count.sh
+        run: bash .ci/.github/scripts/parse_test_count.sh
 
       - name: Run coverage
         if: inputs.coverage_cmd != ''
@@ -165,7 +165,7 @@ jobs:
         if: inputs.coverage_cmd != ''
         env:
           COVERAGE_FORMAT: ${{ inputs.coverage_format }}
-        run: bash .ci/.github/scripts/parse-coverage.sh
+        run: bash .ci/.github/scripts/parse_coverage.sh
 
       - name: Coverage threshold
         if: inputs.coverage_cmd != ''
@@ -267,7 +267,7 @@ jobs:
           ACTOR: ${{ github.actor }}
           TEST_COUNT: ${{ needs.quality.outputs.test_count || '0' }}
           COVERAGE: ${{ needs.quality.outputs.coverage || '0' }}
-        run: bash .ci/.github/scripts/send-otel-trace.sh
+        run: bash .ci/.github/scripts/send_otel_trace.sh
 
       - name: Notify Discord - succès
         if: steps.status.outputs.result == 'success'
