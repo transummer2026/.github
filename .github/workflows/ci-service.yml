@@ -315,3 +315,37 @@ jobs:
               "service": "${{ inputs.service_name }}",
               "sha": "${{ github.sha }}"
             }
+
+  # job 5 - RELEASE
+  # on garde realise please sur le repo pollpear
+  # et on use sementic-release ici car il ne fait pas de pr
+  release:
+    name: Release (semantic-release)
+    runs-on: ubuntu-latest
+    needs: build
+    if: (github.ref_name == 'dev' || github.ref_name == 'main') && needs.build.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DISPATCH_TOKEN }}
+
+      - name: Get CI configs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          path: .ci
+
+      - name: Copy semantic-release config
+        run: cp .ci/.github/.releaserc.json .releaserc.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: npx --yes semantic-release
