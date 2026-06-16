@@ -124,9 +124,16 @@ jobs:
     needs: checks
     outputs:
       test_count: ${{ steps.tests.outputs.test_count }}
-      coverage: ${{ steps.tests.outputs.coverage }}
+      coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          path: .ci
 
       - name: Record start time
         id: timer_start
@@ -141,31 +148,24 @@ jobs:
           config: auto
 
       - name: Tests unitaires
-        id: tests
         run: |
-          ${{ inputs.test_cmd }}
+          set -o pipefail
+          ${{ inputs.test_cmd }} 2>&1 | tee test-output.log
 
-      - name: Coverage
+      - name: Parse test count
+        id: tests
+        run: bash .ci/.github/scripts/parse-test-count.sh
+
+      - name: Run coverage
+        if: inputs.coverage_cmd != ''
+        run: ${{ inputs.coverage_cmd }}
+
+      - name: Parse coverage
         id: coverage
         if: inputs.coverage_cmd != ''
-        run: |
-          ${{ inputs.coverage_cmd }}
-
-          # Extraire le % de coverage selon le format
-          COVERAGE=0
-          if [ "${{ inputs.coverage_format }}" = "cobertura" ]; then
-            # Pour cargo tarpaulin --out Xml et pytest --cov-report=xml
-            COVERAGE=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1 | awk '{printf "%d", $1 * 100}')
-          elif [ "${{ inputs.coverage_format }}" = "lcov" ]; then
-            # Pour jest --coverage (lcov.info)
-            TOTAL=$(grep -E "^LF:" coverage/lcov.info | awk -F: '{sum+=$2} END{print sum}')
-            HIT=$(grep -E "^LH:" coverage/lcov.info | awk -F: '{sum+=$2} END{print sum}')
-            if [ "$TOTAL" -gt 0 ]; then
-              COVERAGE=$(awk "BEGIN {printf \"%d\", ($HIT/$TOTAL)*100}")
-            fi
-          fi
-
-          echo "coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+        env:
+          COVERAGE_FORMAT: ${{ inputs.coverage_format }}
+        run: bash .ci/.github/scripts/parse-coverage.sh
 
       - name: Coverage threshold
         if: inputs.coverage_cmd != ''
@@ -246,48 +246,28 @@ jobs:
             echo "status_code=2" >> $GITHUB_OUTPUT
           fi
 
-      - name: Envoyer trace OTel
-        run: |
-          TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
-          SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
-          END_NS=$(date +%s%N)
-          DURATION_MS=${{ needs.build.outputs.duration_ms || '0' }}
-          START_NS=$(( END_NS - DURATION_MS * 1000000 ))
+      - name: Get CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          path: .ci
 
-          curl -sf -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"resourceSpans\": [{
-                \"resource\": {
-                  \"attributes\": [
-                    {\"key\": \"service.name\", \"value\": {\"stringValue\": \"${{ inputs.service_name }}\"}},
-                    {\"key\": \"deployment.environment\", \"value\": {\"stringValue\": \"ci\"}},
-                    {\"key\": \"ci.provider\", \"value\": {\"stringValue\": \"github-actions\"}},
-                    {\"key\": \"ci.repo\", \"value\": {\"stringValue\": \"${{ github.repository }}\"}},
-                    {\"key\": \"ci.branch\", \"value\": {\"stringValue\": \"${{ github.ref_name }}\"}}
-                  ]
-                },
-                \"scopeSpans\": [{
-                  \"spans\": [{
-                    \"traceId\": \"${TRACE_ID}\",
-                    \"spanId\": \"${SPAN_ID}\",
-                    \"name\": \"ci/${{ inputs.service_name }}\",
-                    \"startTimeUnixNano\": \"${START_NS}\",
-                    \"endTimeUnixNano\": \"${END_NS}\",
-                    \"status\": {\"code\": ${{ steps.status.outputs.status_code }}},
-                    \"attributes\": [
-                      {\"key\": \"ci.run_id\", \"value\": {\"stringValue\": \"${{ github.run_id }}\"}},
-                      {\"key\": \"ci.run_number\", \"value\": {\"stringValue\": \"${{ github.run_number }}\"}},
-                      {\"key\": \"ci.actor\", \"value\": {\"stringValue\": \"${{ github.actor }}\"}},
-                      {\"key\": \"ci.status\", \"value\": {\"stringValue\": \"${{ steps.status.outputs.result }}\"}},
-                      {\"key\": \"ci.duration_ms\", \"value\": {\"intValue\": ${DURATION_MS}}},
-                      {\"key\": \"ci.test_count\", \"value\": {\"intValue\": ${{ needs.quality.outputs.test_count || '0' }}}},
-                      {\"key\": \"ci.coverage\", \"value\": {\"intValue\": ${{ steps.coverage.outputs.coverage || '0' }}}}
-                    ]
-                  }]
-                }]
-              }]
-            }"
+      - name: Envoyer trace OTel
+        env:
+          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+          SERVICE: ${{ inputs.service_name }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          DURATION_MS: ${{ needs.build.outputs.duration_ms || '0' }}
+          STATUS_CODE: ${{ steps.status.outputs.status_code }}
+          STATUS_RESULT: ${{ steps.status.outputs.result }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          ACTOR: ${{ github.actor }}
+          TEST_COUNT: ${{ needs.quality.outputs.test_count || '0' }}
+          COVERAGE: ${{ needs.quality.outputs.coverage || '0' }}
+        run: bash .ci/.github/scripts/send-otel-trace.sh
 
       - name: Notify Discord - succès
         if: steps.status.outputs.result == 'success'
@@ -321,4 +301,17 @@ jobs:
               "sha": "${{ github.sha }}",
               "run_id": "${{ github.run_id }}",
               "image": "ghcr.io/${{ github.repository_owner }}/${{ inputs.service_name }}:sha-${{ github.sha }}"
+            }
+
+      - name: Notifier Pollpear (update submodule)
+        if: steps.status.outputs.result == 'success' && github.ref_name == 'dev'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/Pollpear
+          event-type: submodule-update
+          client-payload: |
+            {
+              "service": "${{ inputs.service_name }}",
+              "sha": "${{ github.sha }}"
             }
