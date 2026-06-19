@@ -57,6 +57,9 @@ jobs:
   checks:
     name: Commit lint · Secret scan · Audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       audit_severity: ${{ steps.audit.outputs.severity }}
     steps:
