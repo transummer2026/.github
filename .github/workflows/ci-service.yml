@@ -69,6 +69,8 @@ jobs:
 
       - name: Commit lint
         uses: wagoid/commitlint-github-action@v6
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Secret scanning
         uses: trufflesecurity/trufflehog@main
