@@ -57,6 +57,8 @@ jobs:
             !Todo/**
             !Template/**
             !Diagrams_uml/**
+            CHANGELOG.md
+
 
       - name: Vérification des liens Markdown
         uses: lycheeverse/lychee-action@v1
