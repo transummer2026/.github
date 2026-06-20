@@ -57,7 +57,7 @@ jobs:
             !Todo/**
             !Template/**
             !Diagrams_uml/**
-            CHANGELOG.md
+            !CHANGELOG.md
 
 
       - name: Vérification des liens Markdown
