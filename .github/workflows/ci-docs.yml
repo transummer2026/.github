@@ -63,7 +63,7 @@ jobs:
       - name: Vérification des liens Markdown
         uses: lycheeverse/lychee-action@v1
         with:
-          args: --verbose --no-progress './**/*.md'
+          args: --verbose --no-progress --max-retries 3 --retry-wait-time 5 './**/*.md'
           fail: true
 
       # - name: Génération auto PV et TODO
