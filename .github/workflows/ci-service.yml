@@ -20,6 +20,11 @@ on:
         description: "Commande de build"
         required: true
         type: string
+      install_cmd:
+        description: "Commande d'installation des deps (vide pour rust)"
+        required: false
+        type: string
+        default: ""
       coverage_threshold:
         description: "Seuil de couverture minimal (%)"
         required: false
@@ -143,6 +148,33 @@ jobs:
       - name: Record start time
         id: timer_start
         run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
+
+      - name: Language detector
+        id: lang
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+        run: bash .ci/.github/scripts/detect_language.sh
+
+      - name: Setup Node
+        if: ${{ steps.lang.outputs.language == 'node' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Setup Python
+        if: ${{ steps.lang.outputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.14
+          cache: pip
+      - name: Setup Rust
+        if: ${{ steps.lang.outputs.language == 'rust' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install deps
+        if: inputs.install_cmd != ''
+        run: ${{ inputs.install_cmd }}
 
       - name: Lint
         run: ${{ inputs.lint_cmd }}
