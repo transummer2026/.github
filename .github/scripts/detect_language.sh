@@ -2,7 +2,7 @@
 set -euo pipefail
 
 case "$SERVICE_NAME" in
-  frontend|backend) lang="node" ;;
+  frontend|backend|api) lang="node" ;;
   ai)               lang="python" ;;
   gateway)          lang="rust" ;;
   *)
