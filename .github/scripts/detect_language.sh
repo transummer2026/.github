@@ -7,8 +7,7 @@ case "$SERVICE_NAME" in
   gateway)          lang="rust" ;;
   *)
     echo "::error::Service inconnu pour la détection de langage : $SERVICE_NAME"
-    exit 1
-    ;;
+    lang="";;
 esac
 
 echo "language=$lang" >> "$GITHUB_OUTPUT"
