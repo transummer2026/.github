@@ -61,6 +61,8 @@ on:
         required: true
       DISPATCH_TOKEN:
         required: true
+      SEMANTIC_TOKEN:
+        required: true
 
 jobs:
   # job 1 - CHECKS
@@ -73,7 +75,7 @@ jobs:
     outputs:
       audit_severity: ${{ steps.audit.outputs.severity }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -91,7 +93,7 @@ jobs:
           extra_args: --only-verified
 
       - name: Get CI scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/.github
           token: ${{ secrets.DISPATCH_TOKEN }}
@@ -136,10 +138,10 @@ jobs:
       test_count: ${{ steps.tests.outputs.test_count }}
       coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Get CI scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/.github
           token: ${{ secrets.DISPATCH_TOKEN }}
@@ -157,15 +159,15 @@ jobs:
 
       - name: Setup Node
         if: ${{ steps.lang.outputs.language == 'node' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
       - name: Setup Python
         if: ${{ steps.lang.outputs.language == 'python' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: 3.14
+          python-version: "3.14"
           cache: pip
       - name: Setup Rust
         if: ${{ steps.lang.outputs.language == 'rust' }}
@@ -180,9 +182,9 @@ jobs:
         run: ${{ inputs.lint_cmd }}
 
       - name: SAST - Semgrep
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: auto
+        run: |
+          pipx install semgrep
+          semgrep scan --config auto --error
 
       - name: Tests unitaires
         run: |
@@ -220,7 +222,7 @@ jobs:
     outputs:
       duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Record start time
         id: timer_start
@@ -246,7 +248,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
@@ -270,7 +272,7 @@ jobs:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
       - name: Get CI scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/.github
           token: ${{ secrets.DISPATCH_TOKEN }}
@@ -356,13 +358,13 @@ jobs:
     needs: build
     if: ${{ !inputs.skip_build && (github.ref_name == 'dev' || github.ref_name == 'main') && needs.build.result == 'success' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Get CI configs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/.github
           token: ${{ secrets.DISPATCH_TOKEN }}
@@ -372,7 +374,7 @@ jobs:
         run: cp .ci/.github/.releaserc.json .releaserc.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
 

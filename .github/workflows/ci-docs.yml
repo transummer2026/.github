@@ -27,7 +27,7 @@ jobs:
     outputs:
       duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Vérifier tous les nommages
         run: |
