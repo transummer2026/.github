@@ -177,6 +177,10 @@ jobs:
       - name: Install deps
         if: inputs.install_cmd != ''
         run: ${{ inputs.install_cmd }}
+      
+      - name: Prisma generator
+        if: ${{ steps.lang.outputs.language == 'node' }} && ${{ inputs.service_name == 'backend' }}
+        run: npx prisma generate
 
       - name: Lint
         run: ${{ inputs.lint_cmd }}
