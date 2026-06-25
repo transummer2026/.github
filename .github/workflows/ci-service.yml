@@ -179,7 +179,7 @@ jobs:
         run: ${{ inputs.install_cmd }}
       
       - name: Prisma generator
-        if: ${{ steps.lang.outputs.language == 'node' }} && ${{ inputs.service_name == 'backend' }}
+        if: ${{ steps.lang.outputs.language == 'node' && inputs.service_name == 'backend' }}
         run: npx prisma generate
 
       - name: Lint
