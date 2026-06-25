@@ -119,6 +119,15 @@ jobs:
         if: steps.audit.outputs.severity == 'critical'
         run: exit 0
 
+      - name: Notify Discord - CVE haute (warning fort)
+        if: steps.audit.outputs.severity == 'high'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          title: "⚠️ CVE haute - ${{ inputs.service_name }}"
+          description: "@${{ github.actor }} CVE high détectée. À monitorer (non bloquant)."
+          color: 0xFF4500
+
       - name: Notify Discord - CVE mineure
         if: steps.audit.outputs.severity == 'low'
         uses: sarisia/actions-status-discord@v1

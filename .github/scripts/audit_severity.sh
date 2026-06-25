@@ -7,9 +7,11 @@ if [ -n "${AUDIT_CMD:-}" ]; then
   OUTPUT=$(eval "$AUDIT_CMD" 2>&1)
   set -e
   echo "$OUTPUT"
-  if echo "$OUTPUT" | grep -qiE "critical|high"; then
+  if echo "$OUTPUT" | grep -qiE "critical"; then
     SEVERITY="critical"
-  elif echo "$OUTPUT" | grep -qiE "medium|low"; then
+  elif echo "$OUTPUT" | grep -qiE "high"; then
+    SEVERITY="high"
+  elif echo "$OUTPUT" | grep -qiE "moderate|medium|low"; then
     SEVERITY="low"
   fi
 fi
