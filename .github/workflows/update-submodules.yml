@@ -3,7 +3,7 @@ name: Update Submodules (Réutilisable)
 on:
   workflow_call:
     secrets:
-      APP_ID:
+      APP_CLIENT_ID:
         required: true
       APP_PRIVATE_KEY:
         required: true
@@ -15,11 +15,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      - name: Tracer la source du déclenchement
+        env:
+          P_SERVICE: ${{ github.event.client_payload.service }}
+          P_REPO: ${{ github.event.client_payload.repository }}
+          P_BRANCH: ${{ github.event.client_payload.branch }}
+          P_SHA: ${{ github.event.client_payload.sha }}
+          P_ACTOR: ${{ github.event.client_payload.actor }}
+          P_COMMIT_MSG: ${{ github.event.client_payload.commit_message }}
+          P_COMMIT_URL: ${{ github.event.client_payload.commit_url }}
+          P_CI_RUN_URL: ${{ github.event.client_payload.ci_run_url }}
+          P_PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          P_PR_TITLE: ${{ github.event.client_payload.pr_title }}
+          P_PR_URL: ${{ github.event.client_payload.pr_url }}
+        run: |
+          {
+            echo "## Déclenché par \`${GITHUB_EVENT_NAME}\`"
+            echo ""
+            echo "| Champ | Valeur |"
+            echo "| --- | --- |"
+            echo "| Service | ${P_SERVICE:-—} |"
+            echo "| Dépôt | ${P_REPO:-—} |"
+            echo "| Branche | ${P_BRANCH:-—} |"
+            echo "| Commit | [${P_SHA:0:8}](${P_COMMIT_URL:-#}) |"
+            echo "| Message | ${P_COMMIT_MSG:-—} |"
+            echo "| Auteur | ${P_ACTOR:-—} |"
+            echo "| PR | [#${P_PR_NUMBER:-—} ${P_PR_TITLE:-}](${P_PR_URL:-#}) |"
+            echo "| Run CI source | ${P_CI_RUN_URL:-—} |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
