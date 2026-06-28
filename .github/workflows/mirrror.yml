@@ -10,6 +10,12 @@ jobs:
     name: Mirror images
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
@@ -17,53 +23,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Mirror prometheus
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.io/prom/prometheus:latest
-          dst: ghcr.io/transummer2026/prometheus:latest
-
-      - name: Mirror grafana
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.io/grafana/grafana:latest
-          dst: ghcr.io/transummer2026/grafana:latest
-
-      - name: Mirror nginx
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.io/nginx:alpine
-          dst: ghcr.io/transummer2026/nginx:alpine
-
-      - name: Mirror modsecurity
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.io/owasp/modsecurity-crs:nginx-alpine
-          dst: ghcr.io/transummer2026/modsecurity:latest
-
-      - name: Mirror vault
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.io/hashicorp/vault:latest
-          dst: ghcr.io/transummer2026/vault:latest
-
-      - name: Mirror elasticsearch
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.elastic.co/elasticsearch/elasticsearch:latest
-          dst: ghcr.io/transummer2026/elasticsearch:latest
-
-      - name: Mirror logstash
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.elastic.co/logstash/logstash:latest
-          dst: ghcr.io/transummer2026/logstash:latest
-
-      - name: Mirror kibana
-        uses: akhilerm/tag-push-action@v2.2.0
-        with:
-          src: docker.elastic.co/kibana/kibana:latest
-          dst: ghcr.io/transummer2026/kibana:latest
+      - name: Mirror images (multi-arch)
+        run: .github/scripts/mirror-images.sh
 
 #      - name: Notify Discord — succès
 #        if: success()
