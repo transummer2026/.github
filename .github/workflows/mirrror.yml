@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "0 6 1 * *" # 1er de chaque mois à 6h UTC
   workflow_dispatch:
+    inputs:
+      elk_version:
+        description: "Version de la stack Elastic"
+        required: false
+        default: "9.0.0"
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   mirror:
@@ -12,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
@@ -24,7 +36,9 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Mirror images (multi-arch)
-        run: .github/scripts/mirror-images.sh
+        env:
+          ELK_VERSION: ${{ inputs.elk_version || '9.0.0' }}
+        run: bash .github/scripts/mirror-images.sh
 
 #      - name: Notify Discord — succès
 #        if: success()
