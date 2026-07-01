@@ -25,9 +25,9 @@ jobs:
           P_COMMIT_MSG: ${{ github.event.client_payload.commit_message }}
           P_COMMIT_URL: ${{ github.event.client_payload.commit_url }}
           P_CI_RUN_URL: ${{ github.event.client_payload.ci_run_url }}
-          P_PR_NUMBER: ${{ github.event.client_payload.pr_number }}
-          P_PR_TITLE: ${{ github.event.client_payload.pr_title }}
-          P_PR_URL: ${{ github.event.client_payload.pr_url }}
+          P_PR_NUMBER: ${{ github.event.client_payload.pr.number }}
+          P_PR_TITLE: ${{ github.event.client_payload.pr.title }}
+          P_PR_URL: ${{ github.event.client_payload.pr.url }}
         run: |
           {
             echo "## Déclenché par \`${GITHUB_EVENT_NAME}\`"

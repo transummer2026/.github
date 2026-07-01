@@ -375,9 +375,11 @@ jobs:
               "commit_message": ${{ toJSON(github.event.head_commit.message) }},
               "commit_url": "${{ github.event.head_commit.url }}",
               "ci_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-              "pr_number": "${{ steps.src_pr.outputs.number }}",
-              "pr_title": ${{ toJSON(steps.src_pr.outputs.title) }},
-              "pr_url": "${{ steps.src_pr.outputs.url }}"
+              "pr": {
+                "number": "${{ steps.src_pr.outputs.number }}",
+                "title": ${{ toJSON(steps.src_pr.outputs.title) }},
+                "url": "${{ steps.src_pr.outputs.url }}"
+              }
             }
 
   # job 5 - RELEASE
