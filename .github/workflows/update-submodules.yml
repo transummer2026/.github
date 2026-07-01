@@ -51,6 +51,8 @@ jobs:
           client-id: ${{ secrets.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
 
       # https://medium.com/@rezaur.official/integrating-git-submodules-in-ci-c-the-real-world-guide-no-one-writes-497c7287af9f
       - name: Checkout repo (superprojet seul)
