@@ -1,0 +1,155 @@
+name: CI Service Branch (Réutilisable)
+
+# CI1 — feedback rapide sur push de branche de travail.
+# Un job : commitlint + secret scan + lint. L'observabilité (OTel,
+# Discord) 
+# discord only fail pour eviter les spam 
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Nom du service (ex: gateway, api, front)"
+        required: true
+        type: string
+      lint_cmd:
+        description: "Commande de lint"
+        required: true
+        type: string
+      install_cmd:
+        description: "Commande d'installation des deps (vide pour rust)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OTEL_ENDPOINT:
+        required: true
+      TAILSCALE_AUTHKEY:
+        required: true
+      DISCORD_WEBHOOK_REPO:
+        required: true
+      DISPATCH_TOKEN:
+        required: true
+
+jobs:
+  fast-checks:
+    name: Commitlint · Secret scan · Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Record start time
+        id: timer_start
+        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
+
+      - name: Get CI scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          path: .ci
+
+      - name: Commit lint
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+
+      - name: Base du secret scan
+        id: scanbase
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash .ci/.github/scripts/secret_scan_base.sh
+
+      - name: Secret scanning (diff)
+        if: steps.scanbase.outputs.base != ''
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ steps.scanbase.outputs.base }}
+          head: ${{ github.sha }}
+          extra_args: --only-verified
+
+      - name: Secret scanning (complet)
+        if: steps.scanbase.outputs.base == ''
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
+
+      - name: Language detector
+        id: lang
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+        run: bash .ci/.github/scripts/detect_language.sh
+
+      - name: Setup Node
+        if: ${{ steps.lang.outputs.language == 'node' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Setup Python
+        if: ${{ steps.lang.outputs.language == 'python' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Setup Rust
+        if: ${{ steps.lang.outputs.language == 'rust' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install deps
+        if: inputs.install_cmd != ''
+        run: ${{ inputs.install_cmd }}
+
+      - name: Prisma generator
+        if: ${{ steps.lang.outputs.language == 'node' && inputs.service_name == 'backend' }}
+        run: npx prisma generate
+
+      - name: Lint
+        run: ${{ inputs.lint_cmd }}
+
+      - name: Compute duration
+        id: timer
+        if: always()
+        run: |
+          END=$(date +%s%3N)
+          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
+
+      - name: Tailscale
+        if: always()
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Envoyer trace OTel
+        if: always()
+        env:
+          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+          SERVICE: ${{ inputs.service_name }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          DURATION_MS: ${{ steps.timer.outputs.ms || '0' }}
+          STATUS_CODE: ${{ job.status == 'success' && '1' || '2' }}
+          STATUS_RESULT: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          ACTOR: ${{ github.actor }}
+        run: bash .ci/.github/scripts/send_otel_trace.sh
+
+      - name: Notify Discord - échec
+        if: failure()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: failure
+          title: "❌ Checks branche échoués - ${{ inputs.service_name }}"
+          description: "@${{ github.actor }} · ${{ github.ref_name }} - voir les logs"
+          color: 0xFF0000
