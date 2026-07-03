@@ -1,3 +1,6 @@
+# ⚠️ ARCHIVÉ — non exécuté (hors de .github/workflows/).
+# Ancien pipeline cyber tout-en-un, conservé pour référence/réutilisation.
+# (hadolint et Trivy ont depuis été intégrés au pipeline générique).
 name: CI Cyber (Réutilisable)
 
 on:
