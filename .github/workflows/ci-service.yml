@@ -188,6 +188,9 @@ jobs:
       coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Get CI scripts
         uses: actions/checkout@v7
@@ -296,7 +299,11 @@ jobs:
     outputs:
       duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
+      # submodules requis dans le contexte du docker build
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Record start time
         id: timer_start

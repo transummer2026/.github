@@ -43,6 +43,9 @@ jobs:
       duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Record start time
         id: timer_start
