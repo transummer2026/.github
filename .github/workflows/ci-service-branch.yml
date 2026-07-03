@@ -54,6 +54,8 @@ jobs:
           path: .ci
 
       - name: Commit lint
+        id: commitlint
+        continue-on-error: true
         uses: wagoid/commitlint-github-action@v6
         with:
           token: ${{ secrets.DISPATCH_TOKEN }}
@@ -66,7 +68,9 @@ jobs:
         run: bash .ci/.github/scripts/secret_scan_base.sh
 
       - name: Secret scanning (diff)
+        id: scan_diff
         if: steps.scanbase.outputs.base != ''
+        continue-on-error: true
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
@@ -75,7 +79,9 @@ jobs:
           extra_args: --only-verified
 
       - name: Secret scanning (complet)
+        id: scan_full
         if: steps.scanbase.outputs.base == ''
+        continue-on-error: true
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
@@ -114,7 +120,28 @@ jobs:
         run: npx prisma generate
 
       - name: Lint
+        id: lint
+        continue-on-error: true
         run: ${{ inputs.lint_cmd }}
+
+      - name: Lint Dockerfile (hadolint)
+        id: hadolint
+        if: hashFiles('Dockerfile') != ''
+        continue-on-error: true
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: Bilan des checks
+        env:
+          OUTCOMES: |
+            commitlint=${{ steps.commitlint.outcome }}
+            secret-scan-diff=${{ steps.scan_diff.outcome }}
+            secret-scan-complet=${{ steps.scan_full.outcome }}
+            lint=${{ steps.lint.outcome }}
+            hadolint=${{ steps.hadolint.outcome }}
+        run: bash .ci/.github/scripts/check_step_outcomes.sh
 
       - name: Compute duration
         id: timer

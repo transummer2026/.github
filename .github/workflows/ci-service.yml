@@ -109,11 +109,15 @@ jobs:
           fetch-depth: 0
 
       - name: Commit lint
+        id: commitlint
+        continue-on-error: true
         uses: wagoid/commitlint-github-action@v6
         with:
           token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Secret scanning
+        id: secret_scan
+        continue-on-error: true
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
@@ -166,6 +170,13 @@ jobs:
           title: "CVE mineure - ${{ inputs.service_name }}"
           description: "CVE medium/low détectée (info). Aucun blocage."
           color: 0xFFA500
+
+      - name: Bilan des checks
+        env:
+          OUTCOMES: |
+            commitlint=${{ steps.commitlint.outcome }}
+            secret-scan=${{ steps.secret_scan.outcome }}
+        run: bash .ci/.github/scripts/check_step_outcomes.sh
 
   # job 2 - QUALITY
   quality:
@@ -221,12 +232,33 @@ jobs:
         run: npx prisma generate
 
       - name: Lint
+        id: lint
+        continue-on-error: true
         run: ${{ inputs.lint_cmd }}
 
+      - name: Lint Dockerfile (hadolint)
+        id: hadolint
+        if: hashFiles('Dockerfile') != ''
+        continue-on-error: true
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
       - name: SAST - Semgrep
+        id: semgrep
+        continue-on-error: true
         run: |
           pipx install semgrep
           semgrep scan --config auto --error
+
+      - name: Bilan des linters
+        env:
+          OUTCOMES: |
+            lint=${{ steps.lint.outcome }}
+            hadolint=${{ steps.hadolint.outcome }}
+            semgrep=${{ steps.semgrep.outcome }}
+        run: bash .ci/.github/scripts/check_step_outcomes.sh
 
       - name: Tests unitaires
         run: |
