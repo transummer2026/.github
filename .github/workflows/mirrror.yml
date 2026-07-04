@@ -1,8 +1,6 @@
 name: Mirror Docker Hub → GHCR
 
 on:
-  schedule:
-    - cron: "0 6 1 * *" # 1er de chaque mois à 6h UTC
   workflow_dispatch:
     inputs:
       elk_version:
