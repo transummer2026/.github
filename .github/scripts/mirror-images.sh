@@ -5,6 +5,9 @@ ELK_VERSION="${ELK_VERSION:-9.0.0}"
 
 images=(
   "docker.io/prom/prometheus:latest=>ghcr.io/transummer2026/prometheus:latest"
+  "docker.io/prom/node-exporter:latest=>ghcr.io/transummer2026/node-exporter:latest"
+  "docker.io/prometheuscommunity/postgres-exporter:latest=>ghcr.io/transummer2026/postgres-exporter:latest"
+  "docker.io/oliver006/redis_exporter:latest=>ghcr.io/transummer2026/redis-exporter:latest"
   "docker.io/grafana/grafana:latest=>ghcr.io/transummer2026/grafana:latest"
   "docker.io/nginx:alpine=>ghcr.io/transummer2026/nginx:alpine"
   "docker.io/owasp/modsecurity-crs:nginx-alpine=>ghcr.io/transummer2026/modsecurity:latest"
