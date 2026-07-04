@@ -27,6 +27,7 @@ images=(
 
 ok=()
 ko=()
+skipped=()
 
 for pair in "${images[@]}"; do
   src="${pair%%=>*}"
@@ -40,6 +41,15 @@ for pair in "${images[@]}"; do
     echo "${inspect}"
     echo "::endgroup::"
     ko+=("${src}")
+    continue
+  fi
+
+  src_digest="$(awk '/^Digest:/{print $2; exit}' <<<"${inspect}")"
+  dst_digest="$(docker buildx imagetools inspect "${dst}" 2>/dev/null | awk '/^Digest:/{print $2; exit}' || true)"
+  if [[ -n "${src_digest}" && "${src_digest}" == "${dst_digest}" ]]; then
+    echo "Déjà à jour sur GHCR (digest ${src_digest}), rien à mirrorer."
+    echo "::endgroup::"
+    skipped+=("${dst}")
     continue
   fi
 
@@ -62,7 +72,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo ""
     echo "| Image | Statut |"
     echo "|---|---|"
-    for img in ${ok[@]+"${ok[@]}"}; do echo "| \`${img}\` | ✅ mirée |"; done
+    for img in ${ok[@]+"${ok[@]}"}; do echo "| \`${img}\` | ✅ mirée (nouvelle version) |"; done
+    for img in ${skipped[@]+"${skipped[@]}"}; do echo "| \`${img}\` | ⏭️ déjà à jour |"; done
     for img in ${ko[@]+"${ko[@]}"}; do echo "| \`${img}\` | ❌ échec |"; done
   } >>"${GITHUB_STEP_SUMMARY}"
 fi
@@ -72,4 +83,4 @@ if ((${#ko[@]} > 0)); then
   exit 1
 fi
 
-echo "✓ ${#ok[@]} images mirées avec succès"
+echo "✓ ${#ok[@]} image(s) mirée(s), ${#skipped[@]} déjà à jour"
