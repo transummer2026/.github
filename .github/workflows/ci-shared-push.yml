@@ -1,0 +1,150 @@
+name: CI Shared Push (Réutilisable)
+
+# CI2 de shared — pas d'image à builder. Sur push dev (post-merge) :
+# release semantic-release, puis dispatch `shared-update` vers les repos
+# parents (frontend, backend)
+on:
+  workflow_call:
+    secrets:
+      OTEL_ENDPOINT:
+        required: true
+      TAILSCALE_AUTHKEY:
+        required: true
+      DISCORD_WEBHOOK_REPO:
+        required: true
+      APP_CLIENT_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+      SEMANTIC_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release (semantic-release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Générer le token App
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Get CI configs
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ steps.app.outputs.token }}
+          path: .ci
+
+      - name: Copy semantic-release config
+        run: cp .ci/.github/.releaserc.json .releaserc.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 25
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.SEMANTIC_TOKEN }}
+        run: npx --yes semantic-release
+
+  notify:
+    name: Dispatch parents · OTel · Discord
+    runs-on: ubuntu-latest
+    needs: release
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - name: Générer le token App
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Dispatch bump vers frontend
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository_owner }}/Pollpear_frontend
+          event-type: shared-update
+          client-payload: |
+            {
+              "repository": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "actor": "${{ github.actor }}"
+            }
+
+      - name: Dispatch bump vers backend
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository_owner }}/Pollpear_backend
+          event-type: shared-update
+          client-payload: |
+            {
+              "repository": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "actor": "${{ github.actor }}"
+            }
+
+      - name: Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Get CI scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          token: ${{ steps.app.outputs.token }}
+          path: .ci
+
+      - name: Envoyer trace OTel
+        env:
+          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+          SERVICE: shared
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          DURATION_MS: "0"
+          STATUS_CODE: ${{ needs.release.result == 'success' && '1' || '2' }}
+          STATUS_RESULT: ${{ needs.release.result }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          ACTOR: ${{ github.actor }}
+        run: bash .ci/.github/scripts/send_otel_trace.sh
+
+      - name: Notify Discord - succès
+        if: needs.release.result == 'success'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: success
+          title: "✅ Shared shippé - bump dispatché vers frontend/backend"
+          description: "sha-${{ github.sha }}"
+
+      - name: Notify Discord - échec
+        if: needs.release.result != 'success'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_REPO }}
+          status: failure
+          title: "❌ Release shared échouée (bump quand même dispatché)"
+          description: "@${{ github.actor }} - voir les logs"
+          color: 0xFF0000
