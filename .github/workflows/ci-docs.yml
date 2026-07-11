@@ -1,5 +1,6 @@
 name: CI Docs (Réutilisables)
 
+
 on:
   workflow_dispatch:
   workflow_call:
@@ -21,24 +22,32 @@ concurrency:
 
 jobs:
   docs:
-    name: Lint · Checks · Publication
+    name: Lint · Nommage · Publication · Observ
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      duration_ms: ${{ steps.timer.outputs.ms }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Get CI scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/.github
+          path: .ci
+
       - name: Record start time
         id: timer_start
-        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
+        run: echo "start=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
 
       - name: Commit lint
+        id: commitlint
+        continue-on-error: true
         uses: wagoid/commitlint-github-action@v6
 
       - name: Secret scanning
+        id: secret_scan
+        continue-on-error: true
         uses: trufflesecurity/trufflehog@v3.95.5
         with:
           path: ./
@@ -47,33 +56,42 @@ jobs:
           extra_args: --only-verified
 
       - name: Markdown lint
+        id: mdlint
+        continue-on-error: true
         uses: DavidAnson/markdownlint-cli2-action@v16
         with:
           globs: |
             **/*.md
             !Archives/**
             !.github/**
+            !.ci/**
             !Pv/**
             !Todo/**
             !Template/**
             !Diagrams_uml/**
             !CHANGELOG.md
 
-
       - name: Vérification des liens Markdown
+        id: links
+        continue-on-error: true
         uses: lycheeverse/lychee-action@v1
         with:
-          args: --verbose --no-progress --max-retries 3 --retry-wait-time 5 './**/*.md'
+          args: --verbose --no-progress --max-retries 3 --retry-wait-time 5 --exclude-path .ci './**/*.md'
           fail: true
 
-      # - name: Génération auto PV et TODO
-      #   run: |
-      #     echo "# PV Auto-généré - $(date +%Y-%m-%d)" > _PV.md
-      #     find . -name "PV-*.md" ! -path './.git*' | sort >> _PV.md || true
-      #     echo "# TODO Auto-généré - $(date +%Y-%m-%d)" > _TODO.md
-      #     grep -rn "TODO" --include="*.md" . ! -path './.git*' >> _TODO.md || true
-
+      - name: Vérifier tous les nommages
+        id: naming
+        continue-on-error: true
+        run: bash .ci/.github/scripts/check_docs_naming.sh
+        
       - name: Versioning & publication
+        id: release
+        continue-on-error: true
+        if: >-
+          steps.commitlint.outcome == 'success' &&
+          steps.secret_scan.outcome == 'success' &&
+          steps.mdlint.outcome == 'success' &&
+          steps.links.outcome == 'success'
         uses: googleapis/release-please-action@v4
         with:
           release-type: simple
@@ -84,128 +102,32 @@ jobs:
         if: always()
         run: |
           END=$(date +%s%3N)
-          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
+          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> "$GITHUB_OUTPUT"
 
-  naming:
-    name: Nommage · Dossiers · Fichiers · Templates
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Vérifier tous les nommages
+      - name: Déterminer statut
+        id: status
+        env:
+          OUTCOMES: |
+            commitlint=${{ steps.commitlint.outcome }}
+            secret-scan=${{ steps.secret_scan.outcome }}
+            markdown-lint=${{ steps.mdlint.outcome }}
+            liens-markdown=${{ steps.links.outcome }}
+            nommage=${{ steps.naming.outcome }}
+            release-please=${{ steps.release.outcome }}
         run: |
-          export LC_ALL=en_US.UTF-8
-
-          mapfile -t IGNORED_FOLDERS   < <(jq -r '.ignored_folders[]'        .ci_config.json 2>/dev/null)
-          mapfile -t IGNORED_FILES     < <(jq -r '.ignored_files[]'          .ci_config.json 2>/dev/null)
-          mapfile -t IGNORED_TEMPLATES < <(jq -r '.ignored_Templates_files[]' .ci_config.json 2>/dev/null)
-
-          folder_errors=()
-          file_errors=()
-          template_errors=()
-
-          is_ignored_path() {
-            local path="$1"; shift
-            for pattern in "$@"; do
-              [[ "$path" == *"/$pattern"* || "$path" == *"/$pattern" ]] && return 0
-            done
-            return 1
-          }
-
-          is_ignored_file() {
-            local entry="$1" base="$2"; shift 2
-            for pattern in "$@"; do
-              if [[ "$pattern" == */* || "$pattern" == *\** ]]; then
-                # pattern avec chemin ou glob → match sur le chemin complet
-                [[ "$entry" == ./$pattern ]] && return 0
-              else
-                # nom simple → match sur le basename
-                [[ "$base" == "$pattern" ]] && return 0
-              fi
-            done
-            return 1
-          }
-
-          check_train_case() {
-            [[ "$1" =~ ^[[:upper:]][[:alnum:]]*([-][[:alnum:]]+)*$ ]]
-          }
-
-          # --- Passe unique sur tout l'arbre ---
-          while read -r entry; do
-            if [ -d "$entry" ]; then
-              is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
-              name=$(basename "$entry")
-              if ! [[ "$name" =~ ^[[:upper:]][[:lower:][:digit:]]*(_[[:lower:][:digit:]]+)*$ ]]; then
-                folder_errors+=("  $entry")
-              fi
-
-            else
-              base=$(basename "$entry")
-
-              # Fichiers dans un dossier ignoré → skip
-              is_ignored_path "$entry" "${IGNORED_FOLDERS[@]}" && continue
-
-              # Fichiers Template : check préfixe Template[-_]
-              if [[ "$entry" == ./Template/* ]]; then
-                is_ignored_file "$entry" "$base" "${IGNORED_TEMPLATES[@]}" && continue
-                check="${base#_}"   # strip _ prefix si présent
-                if ! [[ "$check" =~ ^Template[-_] ]]; then
-                  template_errors+=("  $entry")
-                fi
-                continue
-              fi
-
-              # Autres fichiers : check Train-Case
-              is_ignored_file "$entry" "$base" "${IGNORED_FILES[@]}" && continue
-              if [[ "$base" == *.md ]]; then
-                name="${base#_}"; name="${name%.md}"
-              else
-                name="${base%.*}"
-              fi
-              if ! check_train_case "$name"; then
-                file_errors+=("  $entry")
-              fi
-            fi
-          done < <(find . -mindepth 1 -maxdepth 3 ! -path './.git*' \( -type f -o -type d \))
-
-          # --- Rapport final ---
-          total=$(( ${#folder_errors[@]} + ${#file_errors[@]} + ${#template_errors[@]} ))
-
-          if [ ${#folder_errors[@]} -gt 0 ]; then
-            echo "❌ Dossiers mal nommés (${#folder_errors[@]}) — attendu Snake_case"
-            printf '%s\n' "${folder_errors[@]}"
-            echo ""
-          fi
-          if [ ${#template_errors[@]} -gt 0 ]; then
-            echo "❌ Template sans préfixe TPL (${#template_errors[@]})"
-            printf '%s\n' "${template_errors[@]}"
-            echo ""
-          fi
-          if [ ${#file_errors[@]} -gt 0 ]; then
-            echo "❌ Fichiers mal nommés (${#file_errors[@]}) — attendu Train-Case"
-            printf '%s\n' "${file_errors[@]}"
-            echo ""
-          fi
-
-          if [ "$total" -gt 0 ]; then
-            echo "Total : $total erreur(s)"
-            exit 1
+          if grep -q '=failure' <<< "$OUTCOMES"; then
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "status_code=2" >> "$GITHUB_OUTPUT"
           else
-            echo "✅ Tous les nommages sont corrects"
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "status_code=1" >> "$GITHUB_OUTPUT"
           fi
 
-  observe:
-    name: OTel · Discord · Dispatch
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    needs: [docs, naming]
-    if: always()
-    steps:
       - name: Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
       - name: Attendre connexion Tailscale et ping
         run: |
           timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
@@ -213,24 +135,12 @@ jobs:
           echo "Ping VPS..."
           ping -c 3 100.65.25.93 || echo "Ping échoué"
 
-
-      - name: Déterminer statut
-        id: status
-        run: |
-          if [[ "${{ needs.docs.result }}" == "success" && "${{ needs.naming.result }}" == "success" ]]; then
-            echo "result=success" >> $GITHUB_OUTPUT
-            echo "status_code=1" >> $GITHUB_OUTPUT
-          else
-            echo "result=failure" >> $GITHUB_OUTPUT
-            echo "status_code=2" >> $GITHUB_OUTPUT
-          fi
-
       - name: Envoyer trace OTel
         run: |
           TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
           SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
           END_NS=$(date +%s%N)
-          DURATION_MS=${{ needs.docs.outputs.duration_ms || '0' }}
+          DURATION_MS=${{ steps.timer.outputs.ms || '0' }}
           START_NS=$(( END_NS - DURATION_MS * 1000000 ))
 
           curl -f -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
@@ -295,3 +205,14 @@ jobs:
               "sha": "${{ github.sha }}",
               "run_id": "${{ github.run_id }}"
             }
+
+      - name: Bilan des checks (gate)
+        env:
+          OUTCOMES: |
+            commitlint=${{ steps.commitlint.outcome }}
+            secret-scan=${{ steps.secret_scan.outcome }}
+            markdown-lint=${{ steps.mdlint.outcome }}
+            liens-markdown=${{ steps.links.outcome }}
+            nommage=${{ steps.naming.outcome }}
+            release-please=${{ steps.release.outcome }}
+        run: bash .ci/.github/scripts/check_step_outcomes.sh
