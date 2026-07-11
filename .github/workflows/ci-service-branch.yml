@@ -106,37 +106,41 @@ jobs:
           SERVICE_NAME: ${{ inputs.service_name }}
         run: bash .ci/.github/scripts/detect_language.sh
 
+      # cache: '' désactive le cache quand le repo n'a pas encore de lockfile
+      # ou de fichier de deps (setup-* échoue sinon sur un repo squelette).
       - name: Setup Node
         if: ${{ steps.lang.outputs.language == 'node' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
       - name: Setup Python
         if: ${{ steps.lang.outputs.language == 'python' }}
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ hashFiles('**/requirements.txt', '**/pyproject.toml') != '' && 'pip' || '' }}
       - name: Setup Rust
-        if: ${{ steps.lang.outputs.language == 'rust' }}
+        if: ${{ steps.lang.outputs.language == 'rust' && steps.lang.outputs.has_project == 'true' }}
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - name: Cache Rust
-        if: ${{ steps.lang.outputs.language == 'rust' }}
+        if: ${{ steps.lang.outputs.language == 'rust' && steps.lang.outputs.has_project == 'true' }}
         uses: Swatinem/rust-cache@v2
 
       - name: Install deps
-        if: inputs.install_cmd != ''
+        if: inputs.install_cmd != '' && steps.lang.outputs.has_project == 'true'
         run: ${{ inputs.install_cmd }}
 
       - name: Prisma generator
-        if: ${{ steps.lang.outputs.language == 'node' && inputs.service_name == 'backend' }}
+        if: ${{ steps.lang.outputs.language == 'node' && inputs.service_name == 'backend' && steps.lang.outputs.has_project == 'true' }}
         run: npx prisma generate
 
+      # Repo squelette (has_project=false) : le lint échouerait sans code.
       - name: Lint
         id: lint
+        if: steps.lang.outputs.has_project == 'true'
         continue-on-error: true
         run: ${{ inputs.lint_cmd }}
 
