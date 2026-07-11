@@ -16,6 +16,7 @@ images=(
   "gcr.io/cadvisor/cadvisor:latest=>ghcr.io/transummer2026/cadvisor:latest"
   "docker.io/grafana/grafana:latest=>ghcr.io/transummer2026/grafana:latest"
   "docker.io/nginx:alpine=>ghcr.io/transummer2026/nginx:alpine"
+  "docker.io/certbot/certbot:latest=>ghcr.io/transummer2026/certbot:latest"
   "docker.io/owasp/modsecurity-crs:4.27.0-nginx-alpine-202606290906=>ghcr.io/transummer2026/modsecurity:latest"
   "docker.io/hashicorp/vault:latest=>ghcr.io/transummer2026/vault:latest"
   "docker.io/postgres:16-alpine=>ghcr.io/transummer2026/postgres:16-alpine"
