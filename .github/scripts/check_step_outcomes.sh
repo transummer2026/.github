@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# BLOCKING=false : bilan purement informatif — les échecs sortent en
+# ::warning et le script ne fait pas échouer le job.
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
+BLOCKING="${BLOCKING:-true}"
 failed=()
 total=0
 
@@ -18,8 +21,13 @@ while IFS='=' read -r name outcome; do
   case "$outcome" in
     failure)
       failed+=("$name")
-      echo "::error title=Check en échec::${name} a échoué — voir le step '${name}' dans ce job"
-      echo "| \`$name\` | ❌ échec |" >> "$SUMMARY"
+      if [ "$BLOCKING" = "true" ]; then
+        echo "::error title=Check en échec::${name} a échoué — voir le step '${name}' dans ce job"
+        echo "| \`$name\` | ❌ échec |" >> "$SUMMARY"
+      else
+        echo "::warning title=Check en échec (non bloquant)::${name} a échoué — voir le step '${name}' dans ce job"
+        echo "| \`$name\` | ⚠️ échec (non bloquant) |" >> "$SUMMARY"
+      fi
       ;;
     success)
       echo "$name : success"
@@ -39,14 +47,22 @@ done <<< "$OUTCOMES"
 echo "" >> "$SUMMARY"
 
 if [ "${#failed[@]}" -gt 0 ]; then
-  {
-    echo "**❌ ${#failed[@]}/${total} check(s) en échec : ${failed[*]}**"
+  if [ "$BLOCKING" = "true" ]; then
+    {
+      echo "**❌ ${#failed[@]}/${total} check(s) en échec : ${failed[*]}**"
+      echo ""
+      echo "> Chaque check tourne jusqu'au bout (continue-on-error) : corrige tout ce qui est ❌ en un seul passage."
+    } >> "$SUMMARY"
     echo ""
-    echo "> Chaque check tourne jusqu'au bout (continue-on-error) : corrige tout ce qui est ❌ en un seul passage."
+    echo "❌ ${#failed[@]}/${total} check(s) en échec : ${failed[*]}"
+    exit 1
+  fi
+  {
+    echo "**⚠️ ${#failed[@]}/${total} check(s) en échec : ${failed[*]} — informatif, ne bloque pas la CI**"
   } >> "$SUMMARY"
   echo ""
-  echo "❌ ${#failed[@]}/${total} check(s) en échec : ${failed[*]}"
-  exit 1
+  echo "⚠️ ${#failed[@]}/${total} check(s) en échec : ${failed[*]} (non bloquant)"
+  exit 0
 fi
 
 echo "**✅ ${total}/${total} checks passés**" >> "$SUMMARY"

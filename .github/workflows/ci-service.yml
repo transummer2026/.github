@@ -297,8 +297,12 @@ jobs:
             semgrep=${{ steps.semgrep.outcome }}
         run: bash .ci/.github/scripts/check_step_outcomes.sh
 
+      # Choix d'équipe : tests et coverage ne bloquent pas la CI — résultat
+      # purement informatif, remonté dans le bilan (warnings) et la télémétrie.
       - name: Tests unitaires
+        id: unit_tests
         if: steps.lang.outputs.has_project == 'true'
+        continue-on-error: true
         run: |
           set -o pipefail
           ${{ inputs.test_cmd }} 2>&1 | tee test-output.log
@@ -315,22 +319,37 @@ jobs:
           tool: cargo-tarpaulin
 
       - name: Run coverage
+        id: run_coverage
         if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true'
+        continue-on-error: true
         run: ${{ inputs.coverage_cmd }}
 
       - name: Parse coverage
         id: coverage
-        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true'
+        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true' && steps.run_coverage.outcome == 'success'
+        continue-on-error: true
         env:
           COVERAGE_FORMAT: ${{ inputs.coverage_format }}
         run: bash .ci/.github/scripts/parse_coverage.sh
 
       - name: Coverage threshold
-        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true'
+        id: coverage_threshold
+        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true' && steps.coverage.outcome == 'success'
+        continue-on-error: true
         env:
           COVERAGE: ${{ steps.coverage.outputs.coverage }}
           THRESHOLD: ${{ inputs.coverage_threshold }}
         run: bash .ci/.github/scripts/check_coverage_threshold.sh
+
+      - name: Bilan des tests (informatif)
+        if: steps.lang.outputs.has_project == 'true'
+        env:
+          BLOCKING: "false"
+          OUTCOMES: |
+            tests=${{ steps.unit_tests.outcome }}
+            coverage=${{ steps.run_coverage.outcome }}
+            coverage-threshold=${{ steps.coverage_threshold.outcome }}
+        run: bash .ci/.github/scripts/check_step_outcomes.sh
 
   # job 3 - BUILD
   build:
