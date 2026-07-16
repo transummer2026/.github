@@ -124,11 +124,15 @@ jobs:
           fi
 
       - name: Tailscale
-        uses: tailscale/github-action@v2
+        continue-on-error: true
+        uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "1.98.1"
+          use-cache: "true"
 
       - name: Attendre connexion Tailscale et ping
+        continue-on-error: true
         run: |
           timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
           echo "Tailscale connecté — IP: $(tailscale ip -4)"
@@ -136,6 +140,7 @@ jobs:
           ping -c 3 100.65.25.93 || echo "Ping échoué"
 
       - name: Envoyer trace OTel
+        continue-on-error: true
         run: |
           TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
           SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
@@ -143,7 +148,7 @@ jobs:
           DURATION_MS=${{ steps.timer.outputs.ms || '0' }}
           START_NS=$(( END_NS - DURATION_MS * 1000000 ))
 
-          curl -f -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
+          curl -f --max-time 30 -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
             -H "Content-Type: application/json" \
             -d "{
               \"resourceSpans\": [{

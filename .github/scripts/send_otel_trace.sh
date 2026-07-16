@@ -19,7 +19,7 @@ SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
 END_NS=$(date +%s%N)
 START_NS=$(( END_NS - DURATION_MS * 1000000 ))
 
-curl -sf -X POST "${OTEL_ENDPOINT}/v1/traces" \
+curl -sf --max-time 30 -X POST "${OTEL_ENDPOINT}/v1/traces" \
   -H "Content-Type: application/json" \
   -d "{
     \"resourceSpans\": [{

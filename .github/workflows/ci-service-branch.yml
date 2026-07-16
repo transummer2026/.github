@@ -172,12 +172,16 @@ jobs:
 
       - name: Tailscale
         if: always()
+        continue-on-error: true
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "1.98.1"
+          use-cache: "true"
 
       - name: Envoyer trace OTel
         if: always()
+        continue-on-error: true
         env:
           OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
           SERVICE: ${{ inputs.service_name }}

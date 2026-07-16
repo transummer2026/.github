@@ -105,9 +105,12 @@ jobs:
             }
 
       - name: Tailscale
+        continue-on-error: true
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "1.98.1"
+          use-cache: "true"
 
       - name: Get CI scripts
         uses: actions/checkout@v7
@@ -117,6 +120,7 @@ jobs:
           path: .ci
 
       - name: Envoyer trace OTel
+        continue-on-error: true
         env:
           OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
           SERVICE: shared

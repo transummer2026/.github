@@ -422,9 +422,12 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Tailscale
+        continue-on-error: true
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "1.98.1"
+          use-cache: "true"
 
       - name: Get CI scripts
         uses: actions/checkout@v7
@@ -443,6 +446,7 @@ jobs:
         run: bash .ci/.github/scripts/global_status.sh
 
       - name: Envoyer trace OTel
+        continue-on-error: true
         env:
           OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
           SERVICE: ${{ inputs.service_name }}
