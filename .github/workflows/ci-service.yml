@@ -58,6 +58,11 @@ on:
         required: false
         type: boolean
         default: false
+      docker_build_args:
+        description: "Build args pour le docker build (une paire NOM=valeur par ligne)"
+        required: false
+        type: string
+        default: ""
     secrets:
       OTEL_ENDPOINT:
         required: true
@@ -390,6 +395,7 @@ jobs:
           context: .
           push: false
           tags: ${{ inputs.service_name }}:ci
+          build-args: ${{ inputs.docker_build_args }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
