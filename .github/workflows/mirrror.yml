@@ -3,6 +3,32 @@ name: Mirror Docker Hub → GHCR
 on:
   workflow_dispatch:
     inputs:
+      service:
+        description: "Image à mirrorer (all = toutes, skip celles déjà à jour)"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - prometheus
+          - alertmanager
+          - node-exporter
+          - postgres-exporter
+          - redis-exporter
+          - nginx-exporter
+          - blackbox-exporter
+          - cadvisor
+          - grafana
+          - nginx
+          - certbot
+          - modsecurity
+          - vault
+          - postgres
+          - redis
+          - garage
+          - elasticsearch
+          - logstash
+          - kibana
       elk_version:
         description: "Version de la stack Elastic"
         required: false
@@ -35,6 +61,7 @@ jobs:
 
       - name: Mirror images (multi-arch)
         env:
+          SERVICE: ${{ inputs.service }}
           ELK_VERSION: ${{ inputs.elk_version || '9.0.0' }}
         run: bash .github/scripts/mirror-images.sh
 

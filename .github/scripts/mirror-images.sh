@@ -2,9 +2,8 @@
 set -euo pipefail
 
 ELK_VERSION="${ELK_VERSION:-9.0.0}"
+service="${SERVICE:-all}"
 
-# NOTE modsecurity: les builds 2026-07 upstream ne publient que linux/386,
-# on épingle le dernier build multi-arch connu (amd64+arm64).
 images=(
   "docker.io/prom/prometheus:latest=>ghcr.io/transummer2026/prometheus:latest"
   "docker.io/prom/alertmanager:latest=>ghcr.io/transummer2026/alertmanager:latest"
@@ -34,6 +33,12 @@ skipped=()
 for pair in "${images[@]}"; do
   src="${pair%%=>*}"
   dst="${pair##*=>}"
+
+  name="${dst##*/}"
+  name="${name%%:*}"
+  if [[ "${service}" != "all" && "${service}" != "${name}" ]]; then
+    continue
+  fi
 
   echo "::group::Mirror ${src} -> ${dst}"
 
