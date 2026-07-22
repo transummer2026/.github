@@ -21,6 +21,7 @@ images=(
   "docker.io/hashicorp/vault:latest=>ghcr.io/transummer2026/vault:latest"
   "docker.io/postgres:16-alpine=>ghcr.io/transummer2026/postgres:16-alpine"
   "docker.io/redis:7-alpine=>ghcr.io/transummer2026/redis:7-alpine"
+  "docker.io/dxflrs/garage:v2.3.0=>ghcr.io/transummer2026/garage:v2.3.0"
   "docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION}=>ghcr.io/transummer2026/elasticsearch:${ELK_VERSION}"
   "docker.elastic.co/logstash/logstash:${ELK_VERSION}=>ghcr.io/transummer2026/logstash:${ELK_VERSION}"
   "docker.elastic.co/kibana/kibana:${ELK_VERSION}=>ghcr.io/transummer2026/kibana:${ELK_VERSION}"
