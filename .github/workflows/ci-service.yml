@@ -113,14 +113,14 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           path: .ci
 
-      - name: Normaliser le titre de PR depuis le nom de branche
+      - name: Normaliser la PR (assignee + titre depuis le nom de branche)
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.head_ref }}
-        run: bash .ci/.github/scripts/normalize_pr_title.sh
+        run: bash .ci/.github/scripts/normalize_pr.sh
 
       - name: Commit lint
         id: commitlint
