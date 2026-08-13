@@ -1,13 +1,26 @@
 name: CI Service (Réutilisable)
 
 # CI3 — validation complète sur PR vers dev : titre PR, commitlint,
-# secret scan, audit deps, lint, SAST, tests, coverage, build de
-# validation du Dockerfile (sans push : personne ne consomme les images
-# de services à ce jour), observabilité, merge-gate. Sur push dev, tous
-# les jobs sont skippés — la validation a déjà tourné sur la PR. Le
-# chemin "ship" (build+push final, release, submodules) est dans
-# ci-services-push.yml, à câbler le jour où le déploiement tirera
-# les images depuis GHCR.
+# secret scan, audit deps, lint, SAST, build de validation du Dockerfile
+# (sans push : personne ne consomme les images de services à ce jour),
+# notifications Discord, merge-gate. Sur push dev, tous les jobs sont skippés —
+# la validation a déjà tourné sur la PR. Le chemin "ship" (build+push
+# final, release, submodules) est dans ci-services-push.yml, à câbler le
+# jour où le déploiement tirera les images depuis GHCR.
+#
+# Tests et coverage ont été retirés : non bloquants par choix d'équipe et
+# seuil de couverture à 0 partout, ils ne gardaient rien — 3 services sur
+# 5 n'ont aucun test, et le couple cargo test + tarpaulin coûtait 4 min
+# par run du gateway pour mesurer 0 %. À recâbler le jour où une suite
+# de tests doit réellement bloquer une PR.
+#
+# Tailscale et la trace OTel ont été retirés : ni l'un ni l'autre n'a
+# jamais fonctionné. Le pin tailscale 1.98.1 n'existe pas dans le canal
+# stable (404 sur pkgs.tailscale.com, curl exit 22), donc aucun tailnet
+# n'était monté, donc le curl OTel expirait systématiquement (exit 28)
+# en brûlant les 30 s de --max-time à chaque run. Les deux étapes étaient
+# en continue-on-error, l'échec restait invisible. À remonter sur une
+# base saine si la télémétrie CI redevient un besoin.
 
 on:
   workflow_call:
@@ -20,39 +33,49 @@ on:
         description: "Commande de lint"
         required: true
         type: string
-      test_cmd:
-        description: "Commande de test"
-        required: true
-        type: string
-      build_cmd:
-        description: "Commande de build"
-        required: true
-        type: string
       install_cmd:
         description: "Commande d'installation des deps (vide pour rust)"
         required: false
         type: string
         default: ""
-      coverage_threshold:
-        description: "Seuil de couverture minimal (%)"
-        required: false
-        type: number
-        default: 80
       audit_cmd:
         description: "Commande dependency audit"
         required: false
         type: string
         default: ""
+
+      # Inputs conservés mais non consommés. GitHub rejette un appel qui
+      # passe un input non déclaré ("If a caller workflow passes an input
+      # that is not specified in the called workflow, this results in an
+      # error"), et les 5 ci.yml des services les passent encore : les
+      # retirer ici casserait leur CI au merge, ci-service.yml étant
+      # référencé via @main. Ils partiront quand les callers cesseront
+      # de les envoyer.
+      test_cmd:
+        description: "Non utilisé — conservé pour compatibilité des callers"
+        required: false
+        type: string
+        default: ""
+      build_cmd:
+        description: "Non utilisé — le job build fait un docker build"
+        required: false
+        type: string
+        default: ""
       coverage_cmd:
-        description: "Commande qui génère le coverage"
+        description: "Non utilisé — conservé pour compatibilité des callers"
         required: false
         type: string
         default: ""
       coverage_format:
-        description: "Format du coverage : cobertura | lcov | tarpaulin"
+        description: "Non utilisé — conservé pour compatibilité des callers"
         required: false
         type: string
-        default: "lcov"
+        default: ""
+      coverage_threshold:
+        description: "Non utilisé — conservé pour compatibilité des callers"
+        required: false
+        type: number
+        default: 0
       skip_build:
         description: "Passer le job build/push GHCR (ex: repo sans Dockerfile)"
         required: false
@@ -64,10 +87,6 @@ on:
         type: string
         default: ""
     secrets:
-      OTEL_ENDPOINT:
-        required: true
-      TAILSCALE_AUTHKEY:
-        required: true
       DISCORD_WEBHOOK_REPO:
         required: true
       GHCR_TOKEN:
@@ -78,6 +97,15 @@ on:
         required: true
       SEMANTIC_TOKEN:
         required: true
+
+      # Secrets conservés mais non consommés, même règle que les inputs
+      # ci-dessus : "If a caller workflow passes a secret that is not
+      # specified in the called workflow, this results in an error".
+      # Les 6 callers les passent encore.
+      OTEL_ENDPOINT:
+        required: false
+      TAILSCALE_AUTHKEY:
+        required: false
 
 permissions:
   contents: read
@@ -192,14 +220,11 @@ jobs:
 
   # job 2 - QUALITY
   quality:
-    name: Lint · SAST · Tests · Coverage
+    name: Lint · SAST
     runs-on: ubuntu-latest
     needs: checks
     if: github.event_name != 'push'
     timeout-minutes: 25
-    outputs:
-      test_count: ${{ steps.tests.outputs.test_count }}
-      coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
       - name: Générer le token App
         id: app
@@ -220,10 +245,6 @@ jobs:
           repository: ${{ github.repository_owner }}/.github
           token: ${{ steps.app.outputs.token }}
           path: .ci
-
-      - name: Record start time
-        id: timer_start
-        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
 
       - name: Language detector
         id: lang
@@ -302,60 +323,6 @@ jobs:
             semgrep=${{ steps.semgrep.outcome }}
         run: bash .ci/.github/scripts/check_step_outcomes.sh
 
-      # Choix d'équipe : tests et coverage ne bloquent pas la CI — résultat
-      # purement informatif, remonté dans le bilan (warnings) et la télémétrie.
-      - name: Tests unitaires
-        id: unit_tests
-        if: steps.lang.outputs.has_project == 'true'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          ${{ inputs.test_cmd }} 2>&1 | tee test-output.log
-
-      - name: Parse test count
-        id: tests
-        if: steps.lang.outputs.has_project == 'true'
-        run: bash .ci/.github/scripts/parse_test_count.sh
-
-      - name: Install cargo-tarpaulin
-        if: contains(inputs.coverage_cmd, 'tarpaulin') && steps.lang.outputs.has_project == 'true'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-tarpaulin
-
-      - name: Run coverage
-        id: run_coverage
-        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true'
-        continue-on-error: true
-        run: ${{ inputs.coverage_cmd }}
-
-      - name: Parse coverage
-        id: coverage
-        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true' && steps.run_coverage.outcome == 'success'
-        continue-on-error: true
-        env:
-          COVERAGE_FORMAT: ${{ inputs.coverage_format }}
-        run: bash .ci/.github/scripts/parse_coverage.sh
-
-      - name: Coverage threshold
-        id: coverage_threshold
-        if: inputs.coverage_cmd != '' && steps.lang.outputs.has_project == 'true' && steps.coverage.outcome == 'success'
-        continue-on-error: true
-        env:
-          COVERAGE: ${{ steps.coverage.outputs.coverage }}
-          THRESHOLD: ${{ inputs.coverage_threshold }}
-        run: bash .ci/.github/scripts/check_coverage_threshold.sh
-
-      - name: Bilan des tests (informatif)
-        if: steps.lang.outputs.has_project == 'true'
-        env:
-          BLOCKING: "false"
-          OUTCOMES: |
-            tests=${{ steps.unit_tests.outcome }}
-            coverage=${{ steps.run_coverage.outcome }}
-            coverage-threshold=${{ steps.coverage_threshold.outcome }}
-        run: bash .ci/.github/scripts/check_step_outcomes.sh
-
   # job 3 - BUILD
   build:
     name: Build Dockerfile
@@ -366,8 +333,6 @@ jobs:
           contains(fromJSON('["success", "skipped"]'), needs.checks.result) &&
           contains(fromJSON('["success", "skipped"]'), needs.quality.result) }}
     timeout-minutes: 25
-    outputs:
-      duration_ms: ${{ steps.timer.outputs.ms }}
     steps:
       - name: Générer le token App
         id: app
@@ -382,10 +347,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.app.outputs.token }}
 
-      - name: Record start time
-        id: timer_start
-        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
-
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -398,13 +359,6 @@ jobs:
           build-args: ${{ inputs.docker_build_args }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Compute duration
-        id: timer
-        if: always()
-        run: |
-          END=$(date +%s%3N)
-          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
 
   merge-gate:
     name: merge-gate
@@ -421,14 +375,6 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: Tailscale
-        continue-on-error: true
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "1.98.1"
-          use-cache: "true"
-
       - name: Get CI scripts
         uses: actions/checkout@v7
         with:
@@ -444,23 +390,6 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           SKIP_BUILD: ${{ inputs.skip_build }}
         run: bash .ci/.github/scripts/global_status.sh
-
-      - name: Envoyer trace OTel
-        continue-on-error: true
-        env:
-          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-          SERVICE: ${{ inputs.service_name }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-          DURATION_MS: ${{ needs.build.outputs.duration_ms || '0' }}
-          STATUS_CODE: ${{ steps.status.outputs.status_code }}
-          STATUS_RESULT: ${{ steps.status.outputs.result }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_NUMBER: ${{ github.run_number }}
-          ACTOR: ${{ github.actor }}
-          TEST_COUNT: ${{ needs.quality.outputs.test_count || '0' }}
-          COVERAGE: ${{ needs.quality.outputs.coverage || '0' }}
-        run: bash .ci/.github/scripts/send_otel_trace.sh
 
       - name: Notify Discord - succès
         if: steps.status.outputs.result == 'success'

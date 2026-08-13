@@ -1,9 +1,11 @@
 name: CI Service Branch (Réutilisable)
 
 # CI1 — feedback rapide sur push de branche de travail.
-# Un job : commitlint + secret scan + lint. L'observabilité (OTel,
-# Discord) 
-# discord only fail pour eviter les spam 
+# Un job : commitlint + secret scan + lint. Discord notifie uniquement
+# les échecs, pour éviter le spam à chaque push.
+# La trace OTel et le Tailscale qui la portait ont été retirés : aucun
+# des deux n'a jamais fonctionné (pin tailscale inexistant, donc curl
+# OTel en timeout à chaque run).
 
 on:
   workflow_call:
@@ -22,16 +24,20 @@ on:
         type: string
         default: ""
     secrets:
-      OTEL_ENDPOINT:
-        required: true
-      TAILSCALE_AUTHKEY:
-        required: true
       DISCORD_WEBHOOK_REPO:
         required: true
       APP_CLIENT_ID:
         required: true
       APP_PRIVATE_KEY:
         required: true
+
+      # Secrets conservés mais non consommés : GitHub rejette un appel qui
+      # passe un secret non déclaré, et Pollpear_shared/ci-branch.yml les
+      # passe encore.
+      OTEL_ENDPOINT:
+        required: false
+      TAILSCALE_AUTHKEY:
+        required: false
 
 jobs:
   fast-checks:
@@ -54,10 +60,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           token: ${{ steps.app.outputs.token }}
-
-      - name: Record start time
-        id: timer_start
-        run: echo "start=$(date +%s%3N)" >> $GITHUB_OUTPUT
 
       - name: Get CI scripts
         uses: actions/checkout@v7
@@ -162,38 +164,6 @@ jobs:
             lint=${{ steps.lint.outcome }}
             hadolint=${{ steps.hadolint.outcome }}
         run: bash .ci/.github/scripts/check_step_outcomes.sh
-
-      - name: Compute duration
-        id: timer
-        if: always()
-        run: |
-          END=$(date +%s%3N)
-          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> $GITHUB_OUTPUT
-
-      - name: Tailscale
-        if: always()
-        continue-on-error: true
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "1.98.1"
-          use-cache: "true"
-
-      - name: Envoyer trace OTel
-        if: always()
-        continue-on-error: true
-        env:
-          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-          SERVICE: ${{ inputs.service_name }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-          DURATION_MS: ${{ steps.timer.outputs.ms || '0' }}
-          STATUS_CODE: ${{ job.status == 'success' && '1' || '2' }}
-          STATUS_RESULT: ${{ job.status }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_NUMBER: ${{ github.run_number }}
-          ACTOR: ${{ github.actor }}
-        run: bash .ci/.github/scripts/send_otel_trace.sh
 
       - name: Notify Discord - échec
         if: failure()

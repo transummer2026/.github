@@ -5,10 +5,6 @@ on:
   workflow_dispatch:
   workflow_call:
     secrets:
-      OTEL_ENDPOINT:
-        required: true
-      TAILSCALE_AUTHKEY:
-        required: true
       DISCORD_WEBHOOK_REPO:
         required: true
       DISPATCH_TOKEN:
@@ -16,13 +12,20 @@ on:
       RELEASE_PLEASE_TOKEN:
         required: true
 
+      # Secrets conservés mais non consommés : GitHub rejette un appel qui
+      # passe un secret non déclaré, et docs/ci.yml les passe encore.
+      OTEL_ENDPOINT:
+        required: false
+      TAILSCALE_AUTHKEY:
+        required: false
+
 concurrency:
   group: ${{ github.repository }}-docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   docs:
-    name: Lint · Nommage · Publication · Observ
+    name: Lint · Nommage · Publication
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -35,10 +38,6 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/.github
           path: .ci
-
-      - name: Record start time
-        id: timer_start
-        run: echo "start=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
 
       - name: Commit lint
         id: commitlint
@@ -97,13 +96,6 @@ jobs:
           release-type: simple
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
-      - name: Compute duration
-        id: timer
-        if: always()
-        run: |
-          END=$(date +%s%3N)
-          echo "ms=$(( END - ${{ steps.timer_start.outputs.start }} ))" >> "$GITHUB_OUTPUT"
-
       - name: Déterminer statut
         id: status
         env:
@@ -122,63 +114,6 @@ jobs:
             echo "result=success" >> "$GITHUB_OUTPUT"
             echo "status_code=1" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Tailscale
-        continue-on-error: true
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "1.98.1"
-          use-cache: "true"
-
-      - name: Attendre connexion Tailscale et ping
-        continue-on-error: true
-        run: |
-          timeout 30 bash -c 'until tailscale status --peers=false | grep -q "100\."; do sleep 1; done'
-          echo "Tailscale connecté — IP: $(tailscale ip -4)"
-          echo "Ping VPS..."
-          ping -c 3 100.65.25.93 || echo "Ping échoué"
-
-      - name: Envoyer trace OTel
-        continue-on-error: true
-        run: |
-          TRACE_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 32)
-          SPAN_ID=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 16)
-          END_NS=$(date +%s%N)
-          DURATION_MS=${{ steps.timer.outputs.ms || '0' }}
-          START_NS=$(( END_NS - DURATION_MS * 1000000 ))
-
-          curl -f --max-time 30 -X POST "${{ secrets.OTEL_ENDPOINT }}/v1/traces" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"resourceSpans\": [{
-                \"resource\": {
-                  \"attributes\": [
-                    {\"key\": \"service.name\", \"value\": {\"stringValue\": \"docs\"}},
-                    {\"key\": \"deployment.environment\", \"value\": {\"stringValue\": \"ci\"}},
-                    {\"key\": \"ci.provider\", \"value\": {\"stringValue\": \"github-actions\"}},
-                    {\"key\": \"ci.repo\", \"value\": {\"stringValue\": \"${{ github.repository }}\"}},
-                    {\"key\": \"ci.branch\", \"value\": {\"stringValue\": \"${{ github.ref_name }}\"}}
-                  ]
-                },
-                \"scopeSpans\": [{
-                  \"spans\": [{
-                    \"traceId\": \"${TRACE_ID}\",
-                    \"spanId\": \"${SPAN_ID}\",
-                    \"name\": \"ci/docs\",
-                    \"startTimeUnixNano\": \"${START_NS}\",
-                    \"endTimeUnixNano\": \"${END_NS}\",
-                    \"status\": {\"code\": ${{ steps.status.outputs.status_code }}},
-                    \"attributes\": [
-                      {\"key\": \"ci.run_id\", \"value\": {\"stringValue\": \"${{ github.run_id }}\"}},
-                      {\"key\": \"ci.actor\", \"value\": {\"stringValue\": \"${{ github.actor }}\"}},
-                      {\"key\": \"ci.status\", \"value\": {\"stringValue\": \"${{ steps.status.outputs.result }}\"}},
-                      {\"key\": \"ci.duration_ms\", \"value\": {\"intValue\": ${DURATION_MS}}}
-                    ]
-                  }]
-                }]
-              }]
-            }"
 
       - name: Notify Discord - succès
         if: steps.status.outputs.result == 'success'

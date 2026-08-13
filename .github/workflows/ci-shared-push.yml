@@ -6,10 +6,6 @@ name: CI Shared Push (Réutilisable)
 on:
   workflow_call:
     secrets:
-      OTEL_ENDPOINT:
-        required: true
-      TAILSCALE_AUTHKEY:
-        required: true
       DISCORD_WEBHOOK_REPO:
         required: true
       APP_CLIENT_ID:
@@ -18,6 +14,14 @@ on:
         required: true
       SEMANTIC_TOKEN:
         required: true
+
+      # Secrets conservés mais non consommés : GitHub rejette un appel qui
+      # passe un secret non déclaré, et Pollpear_shared/ci-ship.yml les
+      # passe encore.
+      OTEL_ENDPOINT:
+        required: false
+      TAILSCALE_AUTHKEY:
+        required: false
 
 permissions:
   contents: read
@@ -103,36 +107,6 @@ jobs:
               "branch": "${{ github.ref_name }}",
               "actor": "${{ github.actor }}"
             }
-
-      - name: Tailscale
-        continue-on-error: true
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "1.98.1"
-          use-cache: "true"
-
-      - name: Get CI scripts
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository_owner }}/.github
-          token: ${{ steps.app.outputs.token }}
-          path: .ci
-
-      - name: Envoyer trace OTel
-        continue-on-error: true
-        env:
-          OTEL_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-          SERVICE: shared
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-          DURATION_MS: "0"
-          STATUS_CODE: ${{ needs.release.result == 'success' && '1' || '2' }}
-          STATUS_RESULT: ${{ needs.release.result }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_NUMBER: ${{ github.run_number }}
-          ACTOR: ${{ github.actor }}
-        run: bash .ci/.github/scripts/send_otel_trace.sh
 
       - name: Notify Discord - succès
         if: needs.release.result == 'success'
